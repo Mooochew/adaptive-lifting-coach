@@ -17,3 +17,10 @@ pip install -r requirements.txt
 ```
 
 All Python packages are installed inside `backend/.venv`, never globally.
+
+With the venv active, from `backend/`:
+
+```powershell
+pytest                              # run tests
+uvicorn app.main:app --reload       # start API at http://localhost:8000 (docs at /docs)
+```
