@@ -38,6 +38,11 @@ class Range(_Frozen):
     high: float
 
 
+class WarmupStep(_Frozen):
+    fraction: float                  # of the working weight
+    reps: int
+
+
 class ExerciseRules(_Frozen):
     style: Literal["strength", "hypertrophy"]
     reps: Range                      # rep range to prescribe
@@ -80,6 +85,9 @@ class SharedRules(_Frozen):
     large_jump_fraction: float
     overshoot_reps: int
     volume_target_muscles: tuple[str, ...]
+    max_session_sets_per_muscle: float
+    warmups: dict[str, tuple[WarmupStep, ...]]
+    bar_weight: dict[str, float]
     deload_every_weeks: int
     max_weekly_increase: float
     max_weekly_decrease: float
@@ -160,10 +168,27 @@ REDUCE_FRACTION = 0.075              # "reduce" = ~5-10% load cut (min one MIN_L
 LARGE_JUMP_FRACTION = 0.10           # a step bigger than this share of the load is a "large jump"
 OVERSHOOT_REPS = 3                   # reps above the top of the range required before a large jump
 
-# Muscles with weekly volume targets. Abs, lower back and calves are tracked but get
-# no "below target" warning (mostly trained indirectly or optional for most lifters).
+# Per-session ceiling per muscle (fractional sets: primary 1, secondary 0.5). Growth per
+# session flattens around ~11 fractional sets (Remmert/Pelland et al. meta-regression);
+# coaching guidance is ~6-10. Extra weekly volume goes on another day instead.
+MAX_SESSION_SETS_PER_MUSCLE = 10
+
+# Ramp to the working weight. The heavier step matters most (Stronger by Science on
+# heavier warm-ups); main lifts get a fuller ramp, isolation lifts need none.
+WARMUPS: dict[str, tuple[WarmupStep, ...]] = {
+    "main": (WarmupStep(fraction=0.4, reps=8), WarmupStep(fraction=0.6, reps=5),
+             WarmupStep(fraction=0.75, reps=3), WarmupStep(fraction=0.85, reps=1)),
+    "compound": (WarmupStep(fraction=0.5, reps=8), WarmupStep(fraction=0.75, reps=4)),
+    "isolation": (),
+}
+BAR_WEIGHT: dict[str, float] = {"lb": 45.0, "kg": 20.0}   # barbell warm-ups never go below the empty bar
+
+# Muscles with weekly volume targets. Abs, lower back, calves and front delts are tracked
+# but get no "below target" warning: mostly trained indirectly or optional for most lifters.
+# Front delts in particular need no direct work while pressing is in the program (RP's
+# volume landmarks put their direct-work MEV at 0).
 VOLUME_TARGET_MUSCLES: tuple[str, ...] = (
-    "chest", "lats", "upper_back", "front_delts", "side_delts", "rear_delts",
+    "chest", "lats", "upper_back", "side_delts", "rear_delts",
     "triceps", "biceps", "quads", "hamstrings", "glutes",
 )
 
@@ -188,6 +213,9 @@ SHARED = SharedRules(
     large_jump_fraction=LARGE_JUMP_FRACTION,
     overshoot_reps=OVERSHOOT_REPS,
     volume_target_muscles=VOLUME_TARGET_MUSCLES,
+    max_session_sets_per_muscle=MAX_SESSION_SETS_PER_MUSCLE,
+    warmups=WARMUPS,
+    bar_weight=BAR_WEIGHT,
     deload_every_weeks=DELOAD_EVERY_WEEKS,
     max_weekly_increase=MAX_WEEKLY_INCREASE,
     max_weekly_decrease=MAX_WEEKLY_DECREASE,

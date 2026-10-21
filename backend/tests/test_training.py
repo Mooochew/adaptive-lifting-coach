@@ -342,6 +342,14 @@ class TestComputeMetrics:
         # 3x5 target RPE 8 -> 5 + 2 RIR -> Epley(185, 7)
         assert lift(m, "bench_press").best_e1rm == epley_e1rm(185, 7)
 
+    def test_volume_contributors(self, program):
+        logs = bench_sets(1, 185, 5, 8) + sets_of("triceps_pushdown", 1, 50, 12, 9, sets=2)
+        m = compute_metrics("hypertrophy", program, logs)
+        triceps = next(v for v in m.muscle_volume if v.muscle == "triceps")
+        assert triceps.hard_sets == 3.5
+        assert [(c.exercise_id, c.hard_sets) for c in triceps.contributors] == [
+            ("triceps_pushdown", 2.0), ("bench_press", 1.5)]
+
     def test_untargeted_muscles_have_no_target(self, program):
         m = compute_metrics("hypertrophy", program, sets_of("back_squat", 1, 225, 5, 8, day=2))
         lower_back = next(v for v in m.muscle_volume if v.muscle == "lower_back")

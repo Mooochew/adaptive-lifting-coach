@@ -881,6 +881,14 @@
             "title": "Hard Sets",
             "description": "Primary muscle = 1 per hard set, secondary = 0.5"
           },
+          "contributors": {
+            "items": {
+              "$ref": "#/components/schemas/VolumeContribution"
+            },
+            "type": "array",
+            "title": "Contributors",
+            "description": "Which lifts the sets came from, largest first"
+          },
           "target_low": {
             "anyOf": [
               {
@@ -921,6 +929,7 @@
           "week",
           "muscle",
           "hard_sets",
+          "contributors",
           "target_low",
           "target_max",
           "status"
@@ -1359,6 +1368,27 @@
             "type": "array",
             "title": "Volume Target Muscles"
           },
+          "max_session_sets_per_muscle": {
+            "type": "number",
+            "title": "Max Session Sets Per Muscle"
+          },
+          "warmups": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/WarmupStep"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Warmups"
+          },
+          "bar_weight": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Bar Weight"
+          },
           "deload_every_weeks": {
             "type": "integer",
             "title": "Deload Every Weeks"
@@ -1384,6 +1414,9 @@
           "large_jump_fraction",
           "overshoot_reps",
           "volume_target_muscles",
+          "max_session_sets_per_muscle",
+          "warmups",
+          "bar_weight",
           "deload_every_weeks",
           "max_weekly_increase",
           "max_weekly_decrease"
@@ -1564,6 +1597,24 @@
         ],
         "title": "ValidationError"
       },
+      "VolumeContribution": {
+        "properties": {
+          "exercise_id": {
+            "type": "string",
+            "title": "Exercise Id"
+          },
+          "hard_sets": {
+            "type": "number",
+            "title": "Hard Sets"
+          }
+        },
+        "type": "object",
+        "required": [
+          "exercise_id",
+          "hard_sets"
+        ],
+        "title": "VolumeContribution"
+      },
       "VolumeRules": {
         "properties": {
           "start": {
@@ -1584,6 +1635,24 @@
           "ramp"
         ],
         "title": "VolumeRules"
+      },
+      "WarmupStep": {
+        "properties": {
+          "fraction": {
+            "type": "number",
+            "title": "Fraction"
+          },
+          "reps": {
+            "type": "integer",
+            "title": "Reps"
+          }
+        },
+        "type": "object",
+        "required": [
+          "fraction",
+          "reps"
+        ],
+        "title": "WarmupStep"
       },
       "Week": {
         "properties": {

@@ -196,10 +196,16 @@ class LiftMetrics(BaseModel):
 VolumeStatus = Literal["below", "in_range", "above", "deload", "no_target"]
 
 
+class VolumeContribution(BaseModel):
+    exercise_id: str
+    hard_sets: float
+
+
 class MuscleVolume(BaseModel):
     week: int
     muscle: str
     hard_sets: float = Field(description="Primary muscle = 1 per hard set, secondary = 0.5")
+    contributors: list[VolumeContribution] = Field(description="Which lifts the sets came from, largest first")
     target_low: float | None = Field(description="None for tracked-only muscles (abs, lower back, calves)")
     target_max: float | None
     status: VolumeStatus

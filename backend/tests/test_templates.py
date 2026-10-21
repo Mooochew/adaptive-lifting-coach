@@ -4,8 +4,14 @@ import pytest
 
 from app.demo import build_demo
 from app.exercises import get_exercise
-from app.guards import guard_week, weekly_muscle_sets
-from app.rules import VOLUME_TARGET_MUSCLES, goal_rules, rules_for_exercise, target_rpe_range
+from app.guards import guard_week, session_muscle_sets, weekly_muscle_sets
+from app.rules import (
+    MAX_SESSION_SETS_PER_MUSCLE,
+    VOLUME_TARGET_MUSCLES,
+    goal_rules,
+    rules_for_exercise,
+    target_rpe_range,
+)
 from app.schemas import LiftEstimate, Profile
 from app.templates import SPLITS, _session_minutes, build_template, starting_load
 from app.training import compute_metrics
@@ -52,6 +58,22 @@ def test_volume_ramps_within_limits(goal):
     assert all(v <= volume.max for week in hard for v in week.values())
     if volume.ramp.low > 0:
         assert sum(hard[-1].values()) > sum(hard[0].values())          # hypertrophy volume actually ramps
+
+
+@pytest.mark.parametrize("goal,days", list(itertools.product(GOALS, [3, 4, 5, 6])))
+def test_no_muscle_gets_more_than_10_sets_in_one_session(goal, days):
+    """Per-session ceiling (~10 sets/muscle/session, Schoenfeld; Remmert/Pelland meta-regression)."""
+    program, _, _ = build_template(profile(goal=goal, days_per_week=days, session_minutes=90))
+    for week in program.weeks:
+        for s in week.sessions:
+            assert max(session_muscle_sets(s).values()) <= MAX_SESSION_SETS_PER_MUSCLE
+
+
+def test_front_delts_get_no_direct_volume_padding():
+    """Front delts are covered by pressing; the builder must not add shoulder presses just for them."""
+    program, _, _ = build_template(profile(session_minutes=90))
+    added = {e.exercise_id for w in program.weeks for s in w.sessions for e in s.exercises if e.slot_id.startswith("x_")}
+    assert "db_shoulder_press" not in added
 
 
 def test_sessions_respect_time_budget():

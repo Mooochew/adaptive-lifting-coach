@@ -14,7 +14,7 @@ import { createStore, type StoreApi } from "zustand/vanilla";
 import { useStore } from "zustand";
 import { api as defaultApi, ApiError, type ApiClient } from "./api";
 import { createLocalStore, emptyData, exportData, importData, type AppData, type DataStore } from "./storage";
-import type { Metrics, Profile, Program, SetLog } from "./types";
+import type { ExerciseInfo, Metrics, Profile, Program, RulesResponse, SetLog } from "./types";
 import { currentPosition, newId, removeLog, upsertLog, validateSetLog, withIds, type SessionRef } from "./workout";
 
 export type LoadStatus = "idle" | "loading" | "ready" | "error";
@@ -24,6 +24,10 @@ export interface AppState {
   profile: Profile | null;
   program: Program | null;
   logs: SetLog[];
+  /** Exercise library by id (names, kind, muscles), loaded once from the backend. */
+  catalog: Record<string, ExerciseInfo>;
+  /** Training rules (warm-up scheme, load steps, ...), loaded once from the backend. */
+  rules: RulesResponse | null;
 
   metrics: Metrics | null;
   metricsStatus: LoadStatus;
@@ -42,6 +46,8 @@ export interface AppState {
   selected: SessionRef | null;
 
   hydrate(): void;
+  /** Load the exercise library and training rules (once). */
+  loadCatalog(): Promise<void>;
   loadDemo(): Promise<void>;
   startFromProfile(profile: Profile): Promise<void>;
   reset(): void;
@@ -114,6 +120,8 @@ export function createAppStore({
       profile: null,
       program: null,
       logs: [],
+      catalog: {},
+      rules: null,
       metrics: null,
       metricsStatus: "idle",
       metricsError: null,
@@ -131,6 +139,16 @@ export function createAppStore({
         if (data) replaceData(data);
         set({ hydrated: true });
         if (data?.program) void get().refreshMetrics();
+      },
+
+      async loadCatalog() {
+        if (Object.keys(get().catalog).length && get().rules) return;
+        try {
+          const [list, rules] = await Promise.all([api.exercises(), api.rules()]);
+          set({ catalog: Object.fromEntries(list.map((e) => [e.id, e])), rules });
+        } catch {
+          // Names fall back to ids and warm-up suggestions are skipped; the backend status explains the outage.
+        }
       },
 
       async loadDemo() {

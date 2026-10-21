@@ -52,6 +52,7 @@ from app.schemas import (
     SetLog,
     SlotMetrics,
     Units,
+    VolumeContribution,
     VolumeStatus,
     WeekVolume,
 )
@@ -448,6 +449,7 @@ def compute_metrics(goal: Goal, program: Program, logs: list[SetLog]) -> Metrics
     unrated: dict[int, int] = defaultdict(int)
     week_gaps: dict[int, list[float]] = defaultdict(list)
     muscle_sets: dict[tuple[int, str], float] = defaultdict(float)
+    muscle_sources: dict[tuple[int, str], dict[str, float]] = defaultdict(lambda: defaultdict(float))
 
     # Per exercise
     e1rm_points: dict[str, dict[tuple[int, int], float]] = defaultdict(dict)
@@ -498,6 +500,7 @@ def compute_metrics(goal: Goal, program: Program, logs: list[SetLog]) -> Metrics
             hard_sets[log.week] += 1
             for muscle, credit in muscle_credits(lift).items():
                 muscle_sets[(log.week, muscle)] += credit
+                muscle_sources[(log.week, muscle)][lift] += credit
 
         if rx is not None and log.set_type == "working" and log.set_number <= rx.sets:
             missed[lift] += max(0, rx.reps - (log.reps if log.completed else 0))
@@ -557,8 +560,10 @@ def compute_metrics(goal: Goal, program: Program, logs: list[SetLog]) -> Metrics
     muscle_volume = []
     for (w, m), v in sorted(muscle_sets.items()):
         targeted = m in VOLUME_TARGET_MUSCLES
+        sources = sorted(muscle_sources[(w, m)].items(), key=lambda kv: (-kv[1], kv[0]))
         muscle_volume.append(MuscleVolume(
             week=w, muscle=m, hard_sets=v,
+            contributors=[VolumeContribution(exercise_id=e, hard_sets=s) for e, s in sources],
             target_low=volume_rules.start.low if targeted else None,
             target_max=volume_rules.max if targeted else None,
             status=_volume_status(m, v, volume_rules.start.low, volume_rules.max, w in deload_weeks),

@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from app.exercises import get_exercise, is_known, muscle_credits
 from app.rules import (
     MAX_WEEKLY_DECREASE,
+    MAX_SESSION_SETS_PER_MUSCLE,
     MAX_WEEKLY_INCREASE,
     MIN_LOAD_STEP,
     Goal,
@@ -23,7 +24,7 @@ from app.rules import (
     rules_for_exercise,
     target_rpe_range,
 )
-from app.schemas import Program, SlotMetrics, Units, Week
+from app.schemas import Program, Session, SlotMetrics, Units, Week
 from app.training import round_to_increment
 
 
@@ -76,13 +77,21 @@ def clamp_load(previous: float, proposed: float, units: Units) -> float:
     return max(rounded, 0.0)
 
 
+def session_muscle_sets(session: Session) -> dict[str, float]:
+    """Prescribed hard sets per muscle in one session (primary 1, secondary 0.5)."""
+    totals: dict[str, float] = defaultdict(float)
+    for ex in session.exercises:
+        for muscle, credit in muscle_credits(ex.exercise_id).items():
+            totals[muscle] += ex.sets * credit
+    return dict(totals)
+
+
 def weekly_muscle_sets(week: Week) -> dict[str, float]:
     """Prescribed hard sets per muscle (primary 1, secondary 0.5)."""
     totals: dict[str, float] = defaultdict(float)
     for s in week.sessions:
-        for ex in s.exercises:
-            for muscle, credit in muscle_credits(ex.exercise_id).items():
-                totals[muscle] += ex.sets * credit
+        for muscle, sets in session_muscle_sets(s).items():
+            totals[muscle] += sets
     return dict(totals)
 
 
@@ -186,6 +195,16 @@ def guard_week(
                            "weight only goes up once every set reaches the top of the rep range")
                     notes.append(f"{where}: load {ex.load:g} -> {allowed:g} {units} ({why}).")
                     ex.load = allowed
+
+    # Per-session volume per muscle
+    if not week.is_deload:
+        for session in week.sessions:
+            for muscle, sets in sorted(session_muscle_sets(session).items()):
+                if sets > MAX_SESSION_SETS_PER_MUSCLE:
+                    violations.append(
+                        f"Day {session.day} {muscle}: {sets:g} sets in one session exceeds "
+                        f"{MAX_SESSION_SETS_PER_MUSCLE:g}; move some to another day."
+                    )
 
     # Weekly volume per muscle
     if not week.is_deload:

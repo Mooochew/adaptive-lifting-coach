@@ -17,8 +17,14 @@ Templates are also the fallback when the AI is unavailable.
 """
 
 from app.exercises import ExerciseInfo, get_exercise, muscle_credits
-from app.guards import guard_week, weekly_muscle_sets
-from app.rules import VOLUME_TARGET_MUSCLES, ExerciseRules, goal_rules, rules_for_exercise
+from app.guards import guard_week, session_muscle_sets, weekly_muscle_sets
+from app.rules import (
+    MAX_SESSION_SETS_PER_MUSCLE,
+    VOLUME_TARGET_MUSCLES,
+    ExerciseRules,
+    goal_rules,
+    rules_for_exercise,
+)
 from app.schemas import PrescribedExercise, Profile, Program, Session, Week
 from app.training import floor_to_increment
 
@@ -193,41 +199,51 @@ def _fits(week: Week, session: Session, extra_minutes: float, minutes: int) -> b
     return _session_minutes(session.exercises) + extra_minutes <= minutes
 
 
-def _within_caps(week: Week, change: dict[str, float], volume_max: float,
+def _within_caps(week: Week, session: Session, change: dict[str, float], volume_max: float,
                  previous: dict[str, float] | None, ramp_max: float) -> bool:
-    """Adding `change` (muscle -> sets) keeps every muscle under the weekly max and ramp limit."""
-    current = weekly_muscle_sets(week)
+    """Adding `change` (muscle -> sets) to `session` keeps every muscle under the weekly max,
+    the weekly ramp limit, and the per-session ceiling."""
+    weekly = weekly_muscle_sets(week)
+    in_session = session_muscle_sets(session)
     for muscle, add in change.items():
-        after = current.get(muscle, 0.0) + add
+        after = weekly.get(muscle, 0.0) + add
         if after > volume_max:
             return False
         if previous is not None and after - previous.get(muscle, 0.0) > ramp_max:
+            return False
+        if in_session.get(muscle, 0.0) + add > MAX_SESSION_SETS_PER_MUSCLE:
             return False
     return True
 
 
 def _add_set_for(muscle: str, week: Week, profile: Profile, previous: dict[str, float] | None) -> bool:
-    """Add one set to an exercise training `muscle` directly, or add a fitting accessory."""
+    """Add one set to an exercise training `muscle` directly, or add a fitting accessory.
+
+    Spreads volume: prefers the session where this muscle has done the least so far.
+    """
     volume = goal_rules(profile.goal).volume
     kind_order = {"isolation": 0, "compound": 1, "main": 2}   # grow accessories before main lifts
+    muscle_load = lambda s: session_muscle_sets(s).get(muscle, 0.0)
 
     candidates = []
     for session in week.sessions:
         for ex in session.exercises:
             info = get_exercise(ex.exercise_id)
             if muscle in info.primary and ex.sets < MAX_SETS_PER_EXERCISE:
-                candidates.append((kind_order[info.kind], ex.sets, session, ex, info))
-    for _, _, session, ex, info in sorted(candidates, key=lambda c: (c[0], c[1])):
+                candidates.append(((muscle_load(session), kind_order[info.kind], ex.sets), session, ex, info))
+    for _, session, ex, info in sorted(candidates, key=lambda c: c[0]):
         one_set = (ex.rest_sec + WORK_SECONDS_PER_SET) / 60
         if (_fits(week, session, one_set, profile.session_minutes)
-                and _within_caps(week, muscle_credits(info.id), volume.max, previous, volume.ramp.high)):
+                and _within_caps(week, session, muscle_credits(info.id), volume.max, previous, volume.ramp.high)):
             ex.sets += 1
             return True
 
     available = set(profile.equipment) | {"bodyweight"}
-    # Prefer sessions that already train this muscle (presses on upper days), then the least busy one.
+    # Prefer sessions that already train this muscle (presses on upper days) but have done the
+    # least of it so far, then the least busy one.
     trains = lambda s: any(muscle in muscle_credits(ex.exercise_id) for ex in s.exercises)
-    by_free_time = sorted(week.sessions, key=lambda s: (not trains(s), _session_minutes(s.exercises)))
+    by_free_time = sorted(week.sessions,
+                          key=lambda s: (not trains(s), muscle_load(s), _session_minutes(s.exercises)))
     for exercise_id in ACCESSORIES.get(muscle, []):
         info = get_exercise(exercise_id)
         if info.equipment not in available:
@@ -239,7 +255,7 @@ def _add_set_for(muscle: str, week: Week, profile: Profile, previous: dict[str, 
             minutes = new.sets * (new.rest_sec + WORK_SECONDS_PER_SET) / 60
             change = {m: c * new.sets for m, c in muscle_credits(exercise_id).items()}
             if (_fits(week, session, minutes, profile.session_minutes)
-                    and _within_caps(week, change, volume.max, previous, volume.ramp.high)):
+                    and _within_caps(week, session, change, volume.max, previous, volume.ramp.high)):
                 session.exercises.append(new)
                 return True
     return False

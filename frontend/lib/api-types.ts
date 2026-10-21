@@ -411,6 +411,11 @@ export interface components {
              */
             hard_sets: number;
             /**
+             * Contributors
+             * @description Which lifts the sets came from, largest first
+             */
+            contributors: components["schemas"]["VolumeContribution"][];
+            /**
              * Target Low
              * @description None for tracked-only muscles (abs, lower back, calves)
              */
@@ -619,6 +624,16 @@ export interface components {
             overshoot_reps: number;
             /** Volume Target Muscles */
             volume_target_muscles: string[];
+            /** Max Session Sets Per Muscle */
+            max_session_sets_per_muscle: number;
+            /** Warmups */
+            warmups: {
+                [key: string]: components["schemas"]["WarmupStep"][];
+            };
+            /** Bar Weight */
+            bar_weight: {
+                [key: string]: number;
+            };
             /** Deload Every Weeks */
             deload_every_weeks: number;
             /** Max Weekly Increase */
@@ -701,12 +716,26 @@ export interface components {
             /** Context */
             ctx?: Record<string, never>;
         };
+        /** VolumeContribution */
+        VolumeContribution: {
+            /** Exercise Id */
+            exercise_id: string;
+            /** Hard Sets */
+            hard_sets: number;
+        };
         /** VolumeRules */
         VolumeRules: {
             start: components["schemas"]["Range"];
             /** Max */
             max: number;
             ramp: components["schemas"]["Range"];
+        };
+        /** WarmupStep */
+        WarmupStep: {
+            /** Fraction */
+            fraction: number;
+            /** Reps */
+            reps: number;
         };
         /** Week */
         Week: {

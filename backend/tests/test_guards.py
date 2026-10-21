@@ -103,6 +103,12 @@ class TestGuardWeekRules:
         result = guard_week(week_of(*presses), "hypertrophy", "lb")
         assert any("chest" in v and "max" in v for v in result.violations)
 
+    def test_per_session_muscle_cap_violation(self):
+        """12 chest sets in one session is over the ~10/session ceiling, even if the week is fine."""
+        presses = [bench_rx(slot_id="b1", sets=6), bench_rx(slot_id="b2", exercise_id="incline_db_press", sets=6)]
+        result = guard_week(week_of(*presses), "hypertrophy", "lb")
+        assert any("chest" in v and "one session" in v for v in result.violations)
+
     def test_volume_ramp_violation(self):
         prev = week_of(lateral_rx(sets=3), n=1)
         proposed = week_of(lateral_rx(sets=8))
