@@ -10,50 +10,72 @@ Identity:
     kept the same week to week, so "squat top set" and "squat back-offs" on
     the same day are tracked separately.
   - Logged sets point back to their slot via (block, week, day, slot_id).
+
+Limits: every number must be finite (NaN / Infinity are rejected), weights are capped,
+exercise ids must be in the library, and lists and text are bounded so a request
+can't be arbitrarily large.
 """
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
-from app.exercises import Equipment
+from app.exercises import Equipment, is_known
 from app.rules import Goal
 
 Units = Literal["lb", "kg"]
 Experience = Literal["beginner", "intermediate", "advanced"]
 SetType = Literal["warmup", "working", "backoff"]
 
-MAX_REPS = 300  # high enough for timed holds logged as seconds
+MAX_REPS = 300                      # high enough for timed holds logged as seconds
+MAX_LOAD = 2000                     # above any real lift in lb or kg
+MAX_LOGS = 20_000                   # ~2 years of logged sets, warm-ups included (all blocks are sent)
+MAX_EXERCISES_PER_SESSION = 15
+MAX_BLOCK = 1000                    # training blocks; far beyond a lifetime, small enough for JS numbers
+MAX_TEXT = 500
+
+
+class Model(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)
+
+
+def _known_exercise(exercise_id: str) -> str:
+    if not is_known(exercise_id):
+        raise ValueError(f"unknown exercise id '{exercise_id}'")
+    return exercise_id
+
+
+ExerciseId = Annotated[str, Field(max_length=64), AfterValidator(_known_exercise)]
 
 
 # ---------- Profile ----------
 
-class LiftEstimate(BaseModel):
+class LiftEstimate(Model):
     """A recent set the user can do, used to estimate starting loads."""
-    exercise_id: str
-    weight: float = Field(gt=0)
+    exercise_id: ExerciseId
+    weight: float = Field(gt=0, le=MAX_LOAD)
     reps: int = Field(ge=1, le=20)
 
 
-class Profile(BaseModel):
+class Profile(Model):
     goal: Goal
     experience: Experience
     days_per_week: int = Field(ge=2, le=6)
     session_minutes: int = Field(ge=20, le=120)
-    equipment: list[Equipment] = Field(min_length=1)
-    injuries: str = Field(default="", max_length=500)
+    equipment: list[Equipment] = Field(min_length=1, max_length=6)
+    injuries: str = Field(default="", max_length=MAX_TEXT)
     units: Units = "lb"
-    lift_estimates: list[LiftEstimate] = []
+    lift_estimates: list[LiftEstimate] = Field(default=[], max_length=20)
 
 
 # ---------- Program ----------
 
-class PrescribedExercise(BaseModel):
+class PrescribedExercise(Model):
     slot_id: str = Field(
         min_length=1, max_length=40, pattern=r"^[a-z0-9_-]+$",
         description='Unique within the session and stable across weeks, e.g. "squat_top"',
     )
-    exercise_id: str
+    exercise_id: ExerciseId
     sets: int = Field(ge=1, le=10)
     reps: int = Field(ge=1, le=MAX_REPS, description="Target reps, or the bottom of the rep range")
     reps_max: int | None = Field(
@@ -61,13 +83,13 @@ class PrescribedExercise(BaseModel):
         description="Top of the rep range for double progression (e.g. 3 x 8-12). None = fixed reps.",
     )
     load: float | None = Field(
-        default=None, ge=0,
+        default=None, ge=0, le=MAX_LOAD,
         description="0 for bodyweight exercises; None = not known yet, the lifter picks a working "
                     "weight for the rep range on the first session",
     )
     target_rpe: float = Field(ge=5, le=10)
     rest_sec: int = Field(default=120, ge=30, le=600)
-    notes: str = ""
+    notes: str = Field(default="", max_length=MAX_TEXT)
 
     @model_validator(mode="after")
     def _rep_range_valid(self):
@@ -76,10 +98,10 @@ class PrescribedExercise(BaseModel):
         return self
 
 
-class Session(BaseModel):
+class Session(Model):
     day: int = Field(ge=1, le=7, description="Training day number within the week")
-    focus: str
-    exercises: list[PrescribedExercise] = Field(min_length=1)
+    focus: str = Field(max_length=60)
+    exercises: list[PrescribedExercise] = Field(min_length=1, max_length=MAX_EXERCISES_PER_SESSION)
 
     @model_validator(mode="after")
     def _unique_slots(self):
@@ -89,10 +111,10 @@ class Session(BaseModel):
         return self
 
 
-class Week(BaseModel):
+class Week(Model):
     week: int = Field(ge=1, le=16)
     is_deload: bool = False
-    sessions: list[Session] = Field(min_length=1)
+    sessions: list[Session] = Field(min_length=1, max_length=7)
 
     @model_validator(mode="after")
     def _unique_days(self):
@@ -102,14 +124,14 @@ class Week(BaseModel):
         return self
 
 
-class Program(BaseModel):
-    block: int = Field(default=1, ge=1, description="Training block number; logs carry the same number")
+class Program(Model):
+    block: int = Field(default=1, ge=1, le=MAX_BLOCK, description="Training block number; logs carry the same number")
     units: Units = "lb"
     adjusted_through: int = Field(
-        default=0, ge=0,
+        default=0, ge=0, le=16,
         description="Last week whose results have been applied to later weeks' prescriptions",
     )
-    weeks: list[Week] = Field(min_length=1)
+    weeks: list[Week] = Field(min_length=1, max_length=16)
 
     @model_validator(mode="after")
     def _unique_weeks(self):
@@ -121,20 +143,20 @@ class Program(BaseModel):
 
 # ---------- Logging ----------
 
-class SetLog(BaseModel):
+class SetLog(Model):
     id: str | None = Field(default=None, max_length=64, description="Stable client-side id for this row")
-    block: int = Field(default=1, ge=1)
+    block: int = Field(default=1, ge=1, le=MAX_BLOCK)
     week: int = Field(ge=1, le=16)
     day: int = Field(ge=1, le=7)
-    slot_id: str | None = Field(default=None, description="Prescribed slot; None for unplanned sets")
-    exercise_id: str
+    slot_id: str | None = Field(default=None, max_length=40, description="Prescribed slot; None for unplanned sets")
+    exercise_id: ExerciseId
     set_type: SetType = "working"
     set_number: int = Field(ge=1, le=20)
-    weight: float = Field(ge=0)
+    weight: float = Field(ge=0, le=MAX_LOAD)
     reps: int = Field(ge=0, le=MAX_REPS)
     rpe: float | None = Field(default=None, ge=1, le=10)
     completed: bool = True
-    note: str = ""
+    note: str = Field(default="", max_length=MAX_TEXT)
 
 
 # ---------- Metrics (computed in Python, no LLM) ----------
@@ -142,13 +164,13 @@ class SetLog(BaseModel):
 NextStep = Literal["add_load", "add_reps", "hold", "reduce"]
 
 
-class E1rmPoint(BaseModel):
+class E1rmPoint(Model):
     week: int
     day: int
     e1rm: float
 
 
-class Exposure(BaseModel):
+class Exposure(Model):
     """One slot's working sets in one week."""
     week: int
     load: float = Field(description="Working load (heaviest working set)")
@@ -159,7 +181,7 @@ class Exposure(BaseModel):
     deload: bool
 
 
-class SlotMetrics(BaseModel):
+class SlotMetrics(Model):
     slot_id: str
     day: int
     exposures: list[Exposure]
@@ -176,7 +198,7 @@ class SlotMetrics(BaseModel):
     suggested_reps: int | None
 
 
-class LiftMetrics(BaseModel):
+class LiftMetrics(Model):
     exercise_id: str
     name: str
     style: Literal["strength", "hypertrophy"]
@@ -196,12 +218,12 @@ class LiftMetrics(BaseModel):
 VolumeStatus = Literal["below", "in_range", "above", "deload", "no_target"]
 
 
-class VolumeContribution(BaseModel):
+class VolumeContribution(Model):
     exercise_id: str
     hard_sets: float
 
 
-class MuscleVolume(BaseModel):
+class MuscleVolume(Model):
     week: int
     muscle: str
     hard_sets: float = Field(description="Primary muscle = 1 per hard set, secondary = 0.5")
@@ -211,7 +233,7 @@ class MuscleVolume(BaseModel):
     status: VolumeStatus
 
 
-class WeekVolume(BaseModel):
+class WeekVolume(Model):
     week: int
     is_deload: bool
     tonnage: float = Field(description="Sum of weight x reps for completed non-warm-up sets")
@@ -220,14 +242,14 @@ class WeekVolume(BaseModel):
     avg_rpe_gap: float | None
 
 
-class DeloadSignal(BaseModel):
+class DeloadSignal(Model):
     recommended: bool
     scheduled: bool = Field(description="Next week is a scheduled deload")
     next_week: int
     reasons: list[str]
 
 
-class Metrics(BaseModel):
+class Metrics(Model):
     goal: Goal
     block: int
     lifts: list[LiftMetrics]
@@ -238,20 +260,20 @@ class Metrics(BaseModel):
     deload: DeloadSignal
 
 
-class MetricsRequest(BaseModel):
+class MetricsRequest(Model):
     goal: Goal
     program: Program
-    logs: list[SetLog]
+    logs: list[SetLog] = Field(max_length=MAX_LOGS)
 
 
 # ---------- Programs ----------
 
-class TemplateRequest(BaseModel):
+class TemplateRequest(Model):
     profile: Profile
-    block: int = Field(default=1, ge=1, description="Block number for the new program (previous block + 1)")
+    block: int = Field(default=1, ge=1, le=MAX_BLOCK, description="Block number for the new program (previous block + 1)")
 
 
-class TemplateResponse(BaseModel):
+class TemplateResponse(Model):
     program: Program
     notes: list[str] = Field(description="Guard notes/violations; empty for a healthy template")
     volume_shortfalls: list[str] = Field(
@@ -259,13 +281,13 @@ class TemplateResponse(BaseModel):
     )
 
 
-class AdvanceResponse(BaseModel):
+class AdvanceResponse(Model):
     program: Program
     changes: list[str] = Field(description="Human-readable prescription changes, e.g. 'W3 D1 bench: 185 -> 190 lb'")
     notes: list[str] = Field(description="Guard notes from checking the updated weeks")
 
 
-class DemoAthlete(BaseModel):
+class DemoAthlete(Model):
     profile: Profile
     program: Program
     logs: list[SetLog]

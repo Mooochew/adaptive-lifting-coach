@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { appStore, useApp } from "@/lib/store";
 import type { Profile } from "@/lib/types";
+import { MAX_WEIGHT } from "@/lib/workout";
 import { btn, btnPrimary, chip, field, label } from "./ui";
 
 type Equipment = Profile["equipment"][number];
@@ -74,7 +75,8 @@ export default function Onboarding({ onDone, onCancel }: Props) {
       lift_estimates: MAIN_LIFTS.flatMap((l) => {
         const w = Number(lifts[l.id].weight);
         const r = Number(lifts[l.id].reps);
-        return w > 0 && Number.isInteger(r) && r >= 1 && r <= 20 ? [{ exercise_id: l.id, weight: w, reps: r }] : [];
+        return w > 0 && w <= MAX_WEIGHT && Number.isInteger(r) && r >= 1 && r <= 20
+          ? [{ exercise_id: l.id, weight: w, reps: r }] : [];
       }),
     };
     await startFromProfile(profile);
@@ -141,7 +143,7 @@ export default function Onboarding({ onDone, onCancel }: Props) {
           {MAIN_LIFTS.map((l) => (
             <div key={l.id} className="flex items-center gap-3 border-2 border-line-soft bg-tile-done px-4 py-3">
               <span className="flex-1 font-semibold">{l.name}</span>
-              <input className={`${field} w-24`} type="number" min={0} inputMode="decimal" placeholder={units}
+              <input className={`${field} w-24`} type="number" min={0} max={MAX_WEIGHT} inputMode="decimal" placeholder={units}
                 aria-label={`${l.name} weight in ${units}`} value={lifts[l.id].weight}
                 onChange={(e) => setLifts((cur) => ({ ...cur, [l.id]: { ...cur[l.id], weight: e.target.value } }))} />
               <span className="text-muted">×</span>
@@ -159,11 +161,16 @@ export default function Onboarding({ onDone, onCancel }: Props) {
           onChange={(e) => setInjuries(e.target.value)} placeholder="e.g. left shoulder gets cranky on overhead pressing" />
       </label>
 
-      <div className="flex flex-wrap gap-3">
-        <button type="submit" className={btnPrimary} disabled={busy !== null}>
+      <div className="flex flex-wrap items-center gap-3">
+        <button type="submit" className={btnPrimary} disabled={busy !== null || equipment.length === 0}>
           {busy === "template" ? "Building…" : "Build my program"}
         </button>
         {onCancel && <button type="button" className={btn()} onClick={onCancel}>Cancel</button>}
+        {equipment.length === 0 && (
+          <span className="text-sm text-muted" role="status">
+            Pick at least one piece of equipment: bodyweight alone can&apos;t cover leg days yet.
+          </span>
+        )}
       </div>
     </form>
   );

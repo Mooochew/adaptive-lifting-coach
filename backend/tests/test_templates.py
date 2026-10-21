@@ -13,7 +13,7 @@ from app.rules import (
     target_rpe_range,
 )
 from app.schemas import LiftEstimate, Profile
-from app.templates import SPLITS, _session_minutes, build_template, starting_load
+from app.templates import SPLITS, TemplateError, _session_minutes, build_template, starting_load
 from app.training import compute_metrics
 
 FULL_GYM = ["barbell", "dumbbell", "machine", "cable", "bodyweight", "kettlebell"]
@@ -27,6 +27,27 @@ def profile(**kw) -> Profile:
 
 def find(week, exercise_id):
     return next(e for s in week.sessions for e in s.exercises if e.exercise_id == exercise_id)
+
+
+EQUIPMENT_SETS = [["bodyweight"], ["dumbbell", "bodyweight"], ["barbell", "bodyweight"],
+                  ["machine", "cable", "bodyweight"], ["kettlebell", "bodyweight"], FULL_GYM]
+
+
+@pytest.mark.parametrize("equipment,days,minutes", list(itertools.product(
+    EQUIPMENT_SETS, SPLITS, [30, 45, 60, 75, 90, 120])))
+def test_any_profile_gets_a_program_or_a_clear_reason(equipment, days, minutes):
+    """Reviewer finding: bodyweight-only profiles crashed with a 500 (an empty session)."""
+    try:
+        program, _, _ = build_template(profile(equipment=equipment, days_per_week=days, session_minutes=minutes))
+    except TemplateError as err:
+        assert "equipment" in str(err)
+        return
+    assert all(s.exercises for w in program.weeks for s in w.sessions)
+
+
+def test_bodyweight_only_names_the_day_it_cannot_fill():
+    with pytest.raises(TemplateError, match="Lower A"):
+        build_template(profile(equipment=["bodyweight"], days_per_week=4))
 
 
 @pytest.mark.parametrize("goal,days", list(itertools.product(GOALS, SPLITS)))

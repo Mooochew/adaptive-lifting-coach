@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { SetLog } from "@/lib/types";
+import { MAX_WEIGHT } from "@/lib/workout";
 import { field } from "./ui";
 
 export interface SetValues {
@@ -35,7 +36,7 @@ export default function SetRow({ label, saved, defaults, repsPlaceholder, target
   const parse = (w: string, r: string, e: number | null): SetValues | null => {
     const wn = w === "" ? 0 : Number(w);
     const rn = Number(r);
-    if (!Number.isFinite(wn) || wn < 0 || !Number.isInteger(rn) || rn < 1 || rn > 300) return null;
+    if (!Number.isFinite(wn) || wn < 0 || wn > MAX_WEIGHT || !Number.isInteger(rn) || rn < 1 || rn > 300) return null;
     return { weight: wn, reps: rn, rpe: e };
   };
 
@@ -53,12 +54,14 @@ export default function SetRow({ label, saved, defaults, repsPlaceholder, target
   };
 
   const ready = parse(weight, reps, rpe) !== null;
+  const tooHeavy = weight !== "" && Number(weight) > MAX_WEIGHT;
   const over = !warmup && targetRpe !== undefined && rpe !== null && rpe > targetRpe + 0.5;
 
   return (
     <div className={`grid grid-cols-[48px_130px_120px_minmax(0,1fr)_56px_56px] items-center gap-4 border-t border-line-soft px-[18px] py-2 ${done ? "bg-tile-done" : ""}`}>
       <span className={`display text-2xl font-extrabold tabular ${warmup ? "text-faint" : "text-muted"}`}>{label}</span>
-      <input className={field} type="number" min={0} step="any" inputMode="decimal" aria-label={`Set ${label} weight`}
+      <input className={field} type="number" min={0} max={MAX_WEIGHT} step="any" inputMode="decimal" aria-label={`Set ${label} weight`}
+        aria-invalid={tooHeavy} title={tooHeavy ? `Weight must be ${MAX_WEIGHT} or less` : undefined}
         placeholder="weight" value={weight}
         onChange={(e) => { setWeight(e.target.value); edit(e.target.value, reps, rpe); }} />
       <input className={`${field} text-xl`} type="number" min={1} max={300} inputMode="numeric"

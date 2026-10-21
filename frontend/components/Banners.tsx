@@ -2,15 +2,16 @@
 
 import { useApp } from "@/lib/store";
 
-/** Errors and warnings the lifter should see: action failures, metrics failures, failed saves. */
+/** Errors and warnings the lifter should see: action failures, metrics failures, ignored sets, failed saves. */
 export default function Banners() {
   const error = useApp((s) => s.error);
   const metricsError = useApp((s) => s.metricsError);
   const saveFailed = useApp((s) => s.saveFailed);
+  const ignoredSets = useApp((s) => s.ignoredSets);
   const clearError = useApp((s) => s.clearError);
   const refreshMetrics = useApp((s) => s.refreshMetrics);
 
-  if (!error && !metricsError && !saveFailed) return null;
+  if (!error && !metricsError && !saveFailed && !ignoredSets) return null;
 
   return (
     <div className="mx-auto mt-4 flex w-full max-w-[1440px] flex-col gap-2 px-10" role="alert">
@@ -20,6 +21,7 @@ export default function Banners() {
       {metricsError && (
         <Banner text={`Couldn't update your progress: ${metricsError}`} action={{ label: "Retry", onClick: () => void refreshMetrics() }} />
       )}
+      {ignoredSets && <Banner text={ignoredSets} />}
       {saveFailed && (
         <Banner text="Your browser blocked saving. Changes are kept until you close this tab; use Export data to keep a copy." />
       )}

@@ -54,7 +54,7 @@
           "program"
         ],
         "summary": "Program Template",
-        "description": "Rule-based 4-week block + deload for this profile. No LLM; also the AI fallback.",
+        "description": "Rule-based 4-week block + deload for this profile. No LLM; also the AI fallback.\n\n422 with a readable `detail` when the profile can't be built (e.g. bodyweight only).",
         "operationId": "program_template_program_template_post",
         "requestBody": {
           "content": {
@@ -631,10 +631,12 @@
         "properties": {
           "exercise_id": {
             "type": "string",
+            "maxLength": 64,
             "title": "Exercise Id"
           },
           "weight": {
             "type": "number",
+            "maximum": 2000.0,
             "exclusiveMinimum": 0.0,
             "title": "Weight"
           },
@@ -855,6 +857,7 @@
               "$ref": "#/components/schemas/SetLog"
             },
             "type": "array",
+            "maxItems": 20000,
             "title": "Logs"
           }
         },
@@ -948,6 +951,7 @@
           },
           "exercise_id": {
             "type": "string",
+            "maxLength": 64,
             "title": "Exercise Id"
           },
           "sets": {
@@ -981,6 +985,7 @@
             "anyOf": [
               {
                 "type": "number",
+                "maximum": 2000.0,
                 "minimum": 0.0
               },
               {
@@ -1005,6 +1010,7 @@
           },
           "notes": {
             "type": "string",
+            "maxLength": 500,
             "title": "Notes",
             "default": ""
           }
@@ -1064,6 +1070,7 @@
               ]
             },
             "type": "array",
+            "maxItems": 6,
             "minItems": 1,
             "title": "Equipment"
           },
@@ -1087,6 +1094,7 @@
               "$ref": "#/components/schemas/LiftEstimate"
             },
             "type": "array",
+            "maxItems": 20,
             "title": "Lift Estimates",
             "default": []
           }
@@ -1105,6 +1113,7 @@
         "properties": {
           "block": {
             "type": "integer",
+            "maximum": 1000.0,
             "minimum": 1.0,
             "title": "Block",
             "description": "Training block number; logs carry the same number",
@@ -1121,6 +1130,7 @@
           },
           "adjusted_through": {
             "type": "integer",
+            "maximum": 16.0,
             "minimum": 0.0,
             "title": "Adjusted Through",
             "description": "Last week whose results have been applied to later weeks' prescriptions",
@@ -1131,6 +1141,7 @@
               "$ref": "#/components/schemas/Week"
             },
             "type": "array",
+            "maxItems": 16,
             "minItems": 1,
             "title": "Weeks"
           }
@@ -1190,6 +1201,7 @@
           },
           "focus": {
             "type": "string",
+            "maxLength": 60,
             "title": "Focus"
           },
           "exercises": {
@@ -1197,6 +1209,7 @@
               "$ref": "#/components/schemas/PrescribedExercise"
             },
             "type": "array",
+            "maxItems": 15,
             "minItems": 1,
             "title": "Exercises"
           }
@@ -1226,6 +1239,7 @@
           },
           "block": {
             "type": "integer",
+            "maximum": 1000.0,
             "minimum": 1.0,
             "title": "Block",
             "default": 1
@@ -1245,7 +1259,8 @@
           "slot_id": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 40
               },
               {
                 "type": "null"
@@ -1256,6 +1271,7 @@
           },
           "exercise_id": {
             "type": "string",
+            "maxLength": 64,
             "title": "Exercise Id"
           },
           "set_type": {
@@ -1276,6 +1292,7 @@
           },
           "weight": {
             "type": "number",
+            "maximum": 2000.0,
             "minimum": 0.0,
             "title": "Weight"
           },
@@ -1305,6 +1322,7 @@
           },
           "note": {
             "type": "string",
+            "maxLength": 500,
             "title": "Note",
             "default": ""
           }
@@ -1515,6 +1533,7 @@
           },
           "block": {
             "type": "integer",
+            "maximum": 1000.0,
             "minimum": 1.0,
             "title": "Block",
             "description": "Block number for the new program (previous block + 1)",
@@ -1672,6 +1691,7 @@
               "$ref": "#/components/schemas/Session"
             },
             "type": "array",
+            "maxItems": 7,
             "minItems": 1,
             "title": "Sessions"
           }

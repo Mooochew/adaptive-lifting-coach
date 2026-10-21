@@ -23,6 +23,14 @@ describe("local store", () => {
     expect(loaded?.logs).toHaveLength(3);
   });
 
+  it("still loads data saved before the 2000 weight limit (never moves a user's data to a backup)", () => {
+    const store = createLocalStore(memoryBackend());
+    const data = sample();
+    data.logs[0] = { ...data.logs[0], weight: 2500 };
+    store.save(data);
+    expect(store.load()?.logs[0].weight).toBe(2500);
+  });
+
   it("returns null when empty", () => {
     expect(createLocalStore(memoryBackend()).load()).toBeNull();
   });

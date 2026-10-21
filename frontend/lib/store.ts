@@ -15,7 +15,7 @@ import { useStore } from "zustand";
 import { api as defaultApi, ApiError, type ApiClient } from "./api";
 import { createLocalStore, emptyData, exportData, importData, type AppData, type DataStore } from "./storage";
 import type { ExerciseInfo, Metrics, Profile, Program, RulesResponse, SetLog } from "./types";
-import { currentPosition, newId, removeLog, upsertLog, validateSetLog, withIds, type SessionRef } from "./workout";
+import { currentPosition, newId, newSetProblem, removeLog, upsertLog, withIds, type SessionRef } from "./workout";
 
 export type LoadStatus = "idle" | "loading" | "ready" | "error";
 
@@ -41,6 +41,8 @@ export interface AppState {
   error: string | null;
   /** True when the last save to storage failed (storage full or blocked). */
   saveFailed: boolean;
+  /** Logged sets in this block the backend would reject (e.g. saved before a limit existed), left out of refreshes. */
+  ignoredSets: string | null;
 
   view: "board" | "session";
   selected: SessionRef | null;
@@ -130,6 +132,7 @@ export function createAppStore({
       busy: null,
       error: null,
       saveFailed: false,
+      ignoredSets: null,
       view: "board",
       selected: null,
 
@@ -146,6 +149,8 @@ export function createAppStore({
         try {
           const [list, rules] = await Promise.all([api.exercises(), api.rules()]);
           set({ catalog: Object.fromEntries(list.map((e) => [e.id, e])), rules });
+          // Startup refreshes before the library arrives can't spot retired exercise ids; redo it now.
+          if (get().program) void get().refreshMetrics();
         } catch {
           // Names fall back to ids and warm-up suggestions are skipped; the backend status explains the outage.
         }
@@ -186,7 +191,7 @@ export function createAppStore({
         inflight?.abort();
         replaceData({ profile: null, program: null, logs: [] });
         storage.clear(); // replaceData persisted an empty snapshot; leave storage truly empty
-        set({ volumeShortfalls: [], saveFailed: false, error: null });
+        set({ volumeShortfalls: [], saveFailed: false, error: null, ignoredSets: null });
       },
 
       openSession(ref) {
@@ -199,7 +204,7 @@ export function createAppStore({
 
       upsertSet(log) {
         const row = log.id ? log : { ...log, id: newId() };
-        const problem = validateSetLog(row);
+        const problem = newSetProblem(row);
         if (problem) {
           set({ error: `Can't save that set: ${problem}.` });
           return;
@@ -216,9 +221,26 @@ export function createAppStore({
       },
 
       async refreshMetrics() {
-        const { profile, logs } = get();
+        const { profile } = get();
         let { program } = get();
         if (!profile || !program) return;
+        // The backend only uses this block's logs; sending older blocks would let one
+        // stale row from long ago fail every refresh. Rows it would reject (saved before a
+        // limit existed, or imported) are left out and named in a banner instead.
+        const block = program.block;
+        const { catalog } = get();
+        const catalogLoaded = Object.keys(catalog).length > 0;
+        const problems: string[] = [];
+        const logs = get().logs.filter((l) => {
+          if (l.block !== block) return false;
+          const problem = newSetProblem(l)
+            ?? (catalogLoaded && !catalog[l.exercise_id] ? `unknown exercise "${l.exercise_id}"` : null);
+          if (problem) problems.push(problem);
+          return !problem;
+        });
+        const n = problems.length;
+        set({ ignoredSets: n ? `${n} logged set${n === 1 ? " in this block is" : "s in this block are"} ` +
+                                `ignored for your progress (${problems[0]}).` : null });
 
         inflight?.abort();
         const controller = new AbortController();

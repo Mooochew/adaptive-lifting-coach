@@ -176,7 +176,22 @@ export function draftSet(
   };
 }
 
-/** Mirror of the backend's SetLog limits, so one bad row can't make every /metrics call fail. */
+/** Backend limits (MAX_LOAD and MAX_TEXT in backend/app/schemas.py). */
+export const MAX_WEIGHT = 2000;
+export const MAX_NOTE = 500;
+
+/**
+ * Everything the backend would reject in a set: the shape checks below plus its limits.
+ * Used for sets being saved and for what is sent to the backend; NOT when loading saved
+ * data, so older data that predates a limit still loads (and can be fixed in the app).
+ */
+export function newSetProblem(l: SetLog): string | null {
+  return validateSetLog(l)
+    ?? (l.weight > MAX_WEIGHT ? `weight must be ${MAX_WEIGHT} or less` : null)
+    ?? ((l.note?.length ?? 0) > MAX_NOTE ? `note must be ${MAX_NOTE} characters or less` : null);
+}
+
+/** Mirror of the backend's SetLog shape rules, so one bad row can't make every /metrics call fail. */
 export function validateSetLog(l: SetLog): string | null {
   const int = (v: number, lo: number, hi: number) => Number.isInteger(v) && v >= lo && v <= hi;
   if (!l.exercise_id) return "missing exercise";

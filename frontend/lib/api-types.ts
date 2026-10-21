@@ -36,6 +36,8 @@ export interface paths {
         /**
          * Program Template
          * @description Rule-based 4-week block + deload for this profile. No LLM; also the AI fallback.
+         *
+         *     422 with a readable `detail` when the profile can't be built (e.g. bodyweight only).
          */
         post: operations["program_template_program_template_post"];
         delete?: never;

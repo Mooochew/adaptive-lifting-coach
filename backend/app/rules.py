@@ -193,6 +193,7 @@ VOLUME_TARGET_MUSCLES: tuple[str, ...] = (
 )
 
 DELOAD_EVERY_WEEKS = 5               # scheduled: every 5th week since the last deload
+MIN_HARD_WEEKS_BEFORE_DELOAD = 3     # a planned deload follows at least this many hard weeks
 DELOAD_REGRESSION_MIN_LIFTS = 2      # reactive: performance dropping on at least 2 lifts...
 DELOAD_REGRESSION_FRACTION = 1 / 3   # ...and at least 1/3 of main + compound lifts
 DELOAD_PLATEAU_FRACTION = 0.5        # reactive: half of main + compound lifts plateaued

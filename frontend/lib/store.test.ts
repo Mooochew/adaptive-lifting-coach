@@ -90,6 +90,23 @@ describe("app store", () => {
     expect(store.getState().volumeShortfalls).toEqual(["biceps: 6 of 10"]);
   });
 
+  it("sends only the current block's logs to the backend (old history can't break refreshes)", async () => {
+    const advanceCalls: MetricsRequest[] = [];
+    const { api, metricsCalls } = fakeApi({
+      advance: async (req) => {
+        advanceCalls.push(req);
+        return { program: req.program, changes: [], notes: [] };
+      },
+    });
+    const store = createAppStore({ api, storage: memoryStorage() });
+    await store.getState().loadDemo();
+    await store.getState().startFromProfile(profile);
+
+    expect(store.getState().logs).toHaveLength(3);                      // history still kept locally
+    expect(advanceCalls.at(-1)?.logs).toEqual([]);
+    expect(metricsCalls.at(-1)?.logs).toEqual([]);
+  });
+
   it("debounces refreshes while logging: three quick edits -> one request", async () => {
     const { api, metricsCalls } = fakeApi();
     const store = createAppStore({ api, storage: memoryStorage(), metricsDebounceMs: 400 });
@@ -114,6 +131,54 @@ describe("app store", () => {
     store.getState().upsertSet({ ...benchSets(2, [5])[0], rpe: 0 });
     expect(store.getState().logs).toHaveLength(3);
     expect(store.getState().error).toBe("Can't save that set: RPE must be 1-10.");
+  });
+
+  it("a stored set the backend would reject is left out of refreshes, with a banner (app keeps working)", async () => {
+    const tooHeavy = { ...benchSets(1, [5])[0], id: "old-typo", weight: 2500 };
+    const storage = memoryStorage();
+    storage.saved = { version: 1, profile, program, logs: [...benchSets(1, [5, 5]), tooHeavy],
+                      savedAt: new Date().toISOString() };
+    const { api, metricsCalls } = fakeApi();
+    const store = createAppStore({ api, storage });
+    store.getState().hydrate();
+    await vi.runAllTimersAsync();
+
+    expect(store.getState().logs).toHaveLength(3);                       // nothing deleted
+    expect(metricsCalls.at(-1)?.logs.map((l) => l.weight)).not.toContain(2500);
+    expect(store.getState().metricsStatus).toBe("ready");
+    expect(store.getState().ignoredSets).toBe(
+      "1 logged set in this block is ignored for your progress (weight must be 2000 or less).");
+
+    // Fixing the set clears the banner on the next refresh.
+    store.getState().upsertSet({ ...tooHeavy, weight: 185 });
+    await vi.runAllTimersAsync();
+    expect(store.getState().ignoredSets).toBeNull();
+  });
+
+  it("a stored set with an exercise the backend no longer knows is left out, in the app's real startup order", async () => {
+    const { api, metricsCalls } = fakeApi({
+      exercises: async () => [{ id: "bench_press" } as never, { id: "lateral_raise" } as never],
+      rules: async () => ({}) as never,
+    });
+    const storage = memoryStorage();
+    storage.saved = { version: 1, profile, program, savedAt: new Date().toISOString(),
+                      logs: [...benchSets(1, [5]), { ...benchSets(1, [5])[0], id: "x", exercise_id: "old_lift" }] };
+    const store = createAppStore({ api, storage });
+    store.getState().hydrate();                       // App.tsx: hydrate first...
+    await store.getState().loadCatalog();             // ...then the exercise library arrives
+    await vi.runAllTimersAsync();
+
+    expect(metricsCalls.at(-1)?.logs.map((l) => l.exercise_id)).toEqual(["bench_press"]);
+    expect(store.getState().ignoredSets).toContain('unknown exercise "old_lift"');
+    expect(store.getState().metricsStatus).toBe("ready");
+  });
+
+  it("refuses a new set heavier than the backend accepts", async () => {
+    const store = createAppStore({ ...fakeApi(), storage: memoryStorage() });
+    await store.getState().loadDemo();
+    store.getState().upsertSet({ ...benchSets(2, [5])[0], weight: 2005 });
+    expect(store.getState().logs).toHaveLength(3);
+    expect(store.getState().error).toBe("Can't save that set: weight must be 2000 or less.");
   });
 
   it("assigns an id to a set saved without one", async () => {

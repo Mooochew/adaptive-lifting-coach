@@ -9,6 +9,8 @@ import {
   sessionProgress,
   sessionStatus,
   upsertLog,
+  MAX_WEIGHT,
+  newSetProblem,
   validateSetLog,
   withIds,
 } from "./workout";
@@ -155,5 +157,22 @@ describe("validateSetLog", () => {
   it("accepts a normal set and an unrated set", () => {
     expect(validateSetLog(ok)).toBeNull();
     expect(validateSetLog({ ...ok, rpe: null })).toBeNull();
+  });
+});
+
+describe("newSetProblem (the backend's limits, for sets being saved or sent)", () => {
+  const ok = benchSets(1, [5])[0];
+  it("allows exactly the maximum weight and note length", () => {
+    expect(newSetProblem({ ...ok, weight: MAX_WEIGHT, note: "x".repeat(500) })).toBeNull();
+  });
+  it.each([
+    [{ ...ok, weight: MAX_WEIGHT + 0.5 }, `weight must be ${MAX_WEIGHT} or less`],
+    [{ ...ok, note: "x".repeat(501) }, "note must be 500 characters or less"],
+    [{ ...ok, rpe: 0 }, "RPE must be 1-10"],
+  ])("rejects what the backend would reject", (log, msg) => {
+    expect(newSetProblem(log)).toBe(msg);
+  });
+  it("leaves loading old data alone: validateSetLog still accepts a heavy set", () => {
+    expect(validateSetLog({ ...ok, weight: MAX_WEIGHT + 500 })).toBeNull();
   });
 });

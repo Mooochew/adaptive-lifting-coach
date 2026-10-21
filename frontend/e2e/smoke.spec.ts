@@ -50,6 +50,18 @@ test("onboarding: a new lifter gets a program", async ({ page }) => {
   await expect(page.getByLabel("Set 1 weight", { exact: true })).toHaveValue("185");
 });
 
+test("onboarding: bodyweight only asks for equipment instead of failing", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Build my program" }).click();
+  await page.getByRole("button", { name: "Full gym (everything)" }).click();       // turns everything off
+
+  await expect(page.getByRole("button", { name: "Build my program" })).toBeDisabled();
+  await expect(page.getByRole("status").filter({ hasText: "Pick at least one piece of equipment" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Dumbbells" }).click();
+  await expect(page.getByRole("button", { name: "Build my program" })).toBeEnabled();
+});
+
 test("progress panel shows volume and estimated maxes", async ({ page }) => {
   await loadDemo(page);
   await page.getByRole("button", { name: "Progress", exact: true }).click();

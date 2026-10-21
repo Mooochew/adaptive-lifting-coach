@@ -67,6 +67,18 @@ def _as_lifted(week: Week, by_slot: dict[SlotWeek, list[SetLog]]) -> Week:
     return lifted
 
 
+def last_logged_loads(program: Program, logs: list[SetLog]) -> dict[str, float]:
+    """Heaviest working weight from the most recent week each lift was done (this block)."""
+    latest: dict[str, tuple[int, float]] = {}
+    for log in logs:
+        if log.block != program.block or log.set_type != "working" or not is_done(log) or log.weight <= 0:
+            continue
+        week, weight = latest.get(log.exercise_id, (0, 0.0))
+        if log.week > week or (log.week == week and log.weight > weight):
+            latest[log.exercise_id] = (log.week, log.weight)
+    return {exercise_id: weight for exercise_id, (_, weight) in latest.items()}
+
+
 def advance_program(goal: Goal, program: Program, logs: list[SetLog]) -> tuple[Program, list[str], list[str]]:
     """Apply suggestions from ended weeks to later weeks. Returns (program, changes, guard notes)."""
     through = last_ended_week(program, logs)
@@ -80,6 +92,7 @@ def advance_program(goal: Goal, program: Program, logs: list[SetLog]) -> tuple[P
     load_cut = goal_rules(goal).deload.load_cut
     by_slot = _logs_by_slot(program, logs)
     logged = set(by_slot)
+    last_loads = last_logged_loads(program, logs)
 
     updated = program.model_copy(deep=True)
     changes: list[str] = []
@@ -90,6 +103,10 @@ def advance_program(goal: Goal, program: Program, logs: list[SetLog]) -> tuple[P
     for week in sorted(updated.weeks, key=lambda w: w.week):
         if week.week <= through:
             continue
+        # Loads already in the plan were checked when it was made (e.g. a lift new this week).
+        approved = {(s.day, ex.slot_id): ex.load for s in week.sessions for ex in s.exercises
+                    if ex.load is not None}
+        suggested_from: dict[tuple[int, str], float | None] = {}     # slot -> load before the suggestion
         for session in week.sessions:
             for ex in session.exercises:
                 found = decisions.get((session.day, ex.slot_id))
@@ -101,15 +118,24 @@ def advance_program(goal: Goal, program: Program, logs: list[SetLog]) -> tuple[P
                 new_load = (floor_to_increment(suggested * (1 - load_cut), updated.units)
                             if week.is_deload and suggested and load_cut else suggested)
                 if new_load != ex.load:
-                    if week.week == through + 1:
-                        old = "?" if ex.load is None else f"{ex.load:g}"
-                        changes.append(f"W{week.week} D{session.day} {ex.slot_id}: {old} -> {new_load:g} {updated.units}")
+                    suggested_from[(session.day, ex.slot_id)] = ex.load
                     ex.load = new_load
 
-        result = guard_week(week, goal, updated.units, previous=previous,
-                            slot_metrics={k: v[1] for k, v in decisions.items()})
+        result = guard_week(week, goal, updated.units, previous=previous, last_loads=last_loads,
+                            approved_loads=approved, slot_metrics={k: v[1] for k, v in decisions.items()})
         notes += [f"W{week.week}: {n}" for n in result.notes + result.violations]
         week.sessions = result.week.sessions
+
+        # Report what the lifter will actually see: the load after the guards, not the suggestion.
+        if week.week == through + 1:
+            for session in week.sessions:
+                for ex in session.exercises:
+                    key = (session.day, ex.slot_id)
+                    if key in suggested_from and ex.load != suggested_from[key]:
+                        old, new = suggested_from[key], ex.load
+                        changes.append(f"W{week.week} D{session.day} {ex.slot_id}: "
+                                       f"{'?' if old is None else f'{old:g}'} -> "
+                                       f"{'?' if new is None else f'{new:g}'} {updated.units}")
         if not week.is_deload:          # loads returning after a deload aren't a "jump"
             previous = week
 

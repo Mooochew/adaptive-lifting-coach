@@ -15,6 +15,7 @@ from app.training import (
     detect_regression,
     epley_e1rm,
     is_hard_set,
+    load_from_recent_set,
     mark_prs,
     round_to_increment,
     set_e1rm,
@@ -48,6 +49,15 @@ class TestFormulas:
     def test_rounding(self):
         assert round_to_increment(187.4, "lb") == 185
         assert round_to_increment(81.5, "kg") == 82.5
+
+    def test_load_from_recent_set_rounds_down(self):
+        # 190 x 5 -> e1RM 221.7; 5 reps @ RPE 8 (7-rep effort) -> 179.7 -> 175, not the nearer 180
+        assert load_from_recent_set(190, 5, 5, 8, "lb") == 175
+
+    def test_load_from_a_single(self):
+        # A 1-rep set is the max itself: 300 -> 5 reps @ RPE 8 -> 243.2 -> 240
+        assert load_from_recent_set(300, 1, 5, 8, "lb") == 240
+        assert load_from_recent_set(140, 1, 5, 8, "kg") == 112.5
 
 
 class TestHardSets:

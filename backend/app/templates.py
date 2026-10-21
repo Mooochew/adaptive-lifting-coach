@@ -17,7 +17,7 @@ Templates are also the fallback when the AI is unavailable.
 """
 
 from app.exercises import ExerciseInfo, get_exercise, muscle_credits
-from app.guards import guard_week, session_muscle_sets, weekly_muscle_sets
+from app.guards import guard_program, session_muscle_sets, weekly_muscle_sets
 from app.rules import (
     MAX_SESSION_SETS_PER_MUSCLE,
     VOLUME_TARGET_MUSCLES,
@@ -26,7 +26,11 @@ from app.rules import (
     rules_for_exercise,
 )
 from app.schemas import PrescribedExercise, Profile, Program, Session, Week
-from app.training import floor_to_increment
+from app.training import floor_to_increment, load_from_recent_set
+
+class TemplateError(ValueError):
+    """The profile can't be turned into a program (e.g. not enough equipment for a day)."""
+
 
 BLOCK_WEEKS = 4                      # hard weeks, followed by one deload week
 WORK_SECONDS_PER_SET = 45            # average time under the bar per set
@@ -119,11 +123,7 @@ def starting_load(profile: Profile, info: ExerciseInfo, reps: int, target_rpe: f
     estimate = next((e for e in profile.lift_estimates if e.exercise_id == info.id), None)
     if estimate is None:
         return None
-    # Unrounded Epley (epley_e1rm rounds for display, which can cost a whole load step here)
-    e1rm = estimate.weight * (1 + estimate.reps / 30) if estimate.reps > 1 else estimate.weight
-    rir = 10 - target_rpe
-    load = e1rm / (1 + (reps + rir) / 30)
-    return floor_to_increment(load, profile.units)   # round down: start conservative
+    return load_from_recent_set(estimate.weight, estimate.reps, reps, target_rpe, profile.units)
 
 
 def pick_exercise(slot: str, profile: Profile, used: set[str]) -> ExerciseInfo | None:
@@ -166,6 +166,10 @@ def build_session(day: int, name: str, slots: list[str], profile: Profile) -> Se
             continue
         used.add(info.id)
         exercises.append(make_prescription(slot, info, profile, sets))
+
+    if not exercises:
+        raise TemplateError(f"Not enough equipment to build {name}: the exercise library has nothing for "
+                            f"that day with {', '.join(sorted(set(profile.equipment)))}. Add some equipment.")
 
     # Fit the time budget: drop from the end (isolation work goes first).
     while len(exercises) > MIN_EXERCISES_PER_SESSION and _session_minutes(exercises) > profile.session_minutes:
@@ -322,14 +326,6 @@ def build_template(profile: Profile, block: int = 1) -> tuple[Program, list[str]
         weeks.append(week)
     weeks.append(deload_week(first, profile))
 
-    issues: list[str] = []
-    checked: list[Week] = []
-    previous: Week | None = None
-    for week in weeks:
-        result = guard_week(week, profile.goal, profile.units, previous=previous)
-        issues += result.notes + result.violations
-        checked.append(result.week)
-        if not week.is_deload:
-            previous = result.week
-
-    return Program(block=block, units=profile.units, weeks=checked), issues, shortfalls
+    result = guard_program(Program(block=block, units=profile.units, weeks=weeks), profile.goal,
+                           estimates=profile.lift_estimates)
+    return result.program, result.notes + result.violations, shortfalls

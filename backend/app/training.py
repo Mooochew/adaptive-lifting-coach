@@ -88,6 +88,17 @@ def set_e1rm(weight: float, reps: int, rpe: float | None, assumed_rpe: float | N
     return epley_e1rm(weight, effective)
 
 
+def load_from_recent_set(weight: float, reps: int, target_reps: int, target_rpe: float, units: Units) -> float:
+    """Working load for `target_reps` at `target_rpe`, from a recent set of `weight` x `reps`.
+
+    Unrounded Epley both ways (epley_e1rm rounds for display, which can cost a whole
+    load step), rounded DOWN so starting loads stay conservative.
+    """
+    e1rm = weight * (1 + reps / 30) if reps > 1 else weight
+    load = e1rm / (1 + (target_reps + rpe_to_rir(target_rpe)) / 30)
+    return floor_to_increment(load, units)
+
+
 def round_to_increment(load: float, units: Units) -> float:
     """Round to the nearest loadable weight (multiples of 5 lb / 2.5 kg)."""
     inc = MIN_LOAD_STEP[units]
