@@ -88,6 +88,7 @@ export default function ProgressPanel({ open, onClose }: { open: boolean; onClos
                 <span className="text-right">sets</span>
               </div>
             )}
+            <ul aria-label="Hard sets per muscle">
             {muscles.map((m) => {
               const low = m.target_low ?? 0;
               const max = m.target_max ?? 0;
@@ -95,7 +96,8 @@ export default function ProgressPanel({ open, onClose }: { open: boolean; onClos
                 : m.status === "no_target" ? "bg-[#6f6a62] text-muted" : "bg-chalk text-chalk";
               const [bar, text] = tone.split(" ");
               return (
-                <div key={m.muscle} className="group relative grid grid-cols-[100px_minmax(0,1fr)_44px] items-center gap-3 py-2">
+                <li key={m.muscle} aria-label={`${muscleName(m.muscle)}: ${m.hard_sets} hard sets`}
+                  className="group relative grid grid-cols-[100px_minmax(0,1fr)_44px] items-center gap-3 py-2">
                   <span className="text-[13px] font-bold uppercase tracking-[0.06em] transition-colors group-hover:text-orange">{muscleName(m.muscle)}</span>
                   <div className="relative h-3.5 bg-tile-done">
                     {m.target_low != null && (
@@ -111,9 +113,10 @@ export default function ProgressPanel({ open, onClose }: { open: boolean; onClos
                     {" · "}
                     {m.contributors.map((c) => `${exerciseName(catalog, c.exercise_id)} ${c.hard_sets}`).join(" · ")}
                   </div>
-                </div>
+                </li>
               );
             })}
+            </ul>
             {shortfalls.length > 0 && (
               <p className="mt-3 border-l-2 border-steel pl-2 text-xs text-muted">
                 Your schedule can&apos;t fit the full starting volume for: {shortfalls.join("; ")}.

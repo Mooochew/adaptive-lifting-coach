@@ -63,6 +63,13 @@ Frontend (from `frontend/`): api client, storage, store, workout helpers
 npm test
 ```
 
+End-to-end smoke tests (from `frontend/`): the real app in a real browser against the real backend
+```bash
+npx playwright install chromium   # once
+npm run test:e2e
+```
+These start their own backend (port 8100, needs `backend/.venv` set up) and frontend (port 3100), so you don't need either running, and they won't clash with dev servers you already have open. On a failure, `npx playwright show-report` shows a step-by-step trace. If something is already listening on 3100 or 8100, the tests reuse it instead of starting fresh, so stop leftover servers if results look odd.
+
 ## Troubleshooting
 
 | Problem | Fix |
@@ -71,6 +78,8 @@ npm test
 | `Activate.ps1 cannot be loaded` | Run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once, then activate again. |
 | `npm ci` warns about the engine / Node version | Install Node 24 (e.g. via nvm: `nvm install 24`; `frontend/.nvmrc` pins it). |
 | `npm install <pkg>` crashes with `reading 'edgesOut'` | npm 11.5.x bug when adding packages. Use `npx npm@latest install <pkg>`. Plain `npm ci` is unaffected. |
+| `npm run typecheck` reports errors inside `.next-e2e/` | Leftover generated types from an e2e run (e.g. after renaming a page). Delete `frontend/.next-e2e/` and run it again. |
+| Phone or another device can't open the dev server | It only listens on this computer (`localhost`) on purpose. To test on your network, run `npx next dev --hostname 0.0.0.0` and stop it afterwards. |
 | Port 3000 or 8000 already in use | Stop the other process, or pick other ports: `uvicorn app.main:app --port 8001` and `npm run dev -- -p 3001`, then set `NEXT_PUBLIC_API_URL=http://localhost:8001` in `frontend/.env.local` and `FRONTEND_ORIGIN=http://localhost:3001` in `backend/.env` (see `backend/.env.example`). |
 
 More detail: [frontend/README.md](frontend/README.md).

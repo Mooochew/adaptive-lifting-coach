@@ -16,8 +16,9 @@ e.g. `npx npm@latest install <pkg>`.
 |---|---|
 | `npm run dev` | Dev server |
 | `npm run build` | Production build |
-| `npm run lint` / `npm run typecheck` | ESLint / TypeScript checks |
+| `npm run lint` / `npm run typecheck` | ESLint / TypeScript checks (typecheck generates Next's route types first) |
 | `npm test` | Unit tests (Vitest) for the api client, storage, store and workout helpers |
+| `npm run test:e2e` | Smoke tests (Playwright, `e2e/`): demo logging + reload, onboarding, progress panel, backend down, export/import. Starts its own servers on ports 3100/8100 with a separate build folder (`.next-e2e`). First run: `npx playwright install chromium` |
 | `npm run gen:types` | Regenerate `lib/api-types.ts` from `backend/openapi.json` |
 | `npm run audit:prod` | Vulnerability check of what ships to users (dev tools excluded) |
 

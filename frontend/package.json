@@ -6,12 +6,13 @@
     "node": "^22.12.0 || >=24.0.0"
   },
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --hostname localhost",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
+    "test:e2e": "playwright test",
     "audit:prod": "npm audit --omit=dev",
     "gen:types": "openapi-typescript ../backend/openapi.json -o lib/api-types.ts"
   },

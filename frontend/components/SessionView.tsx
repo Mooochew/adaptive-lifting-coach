@@ -63,7 +63,7 @@ export default function SessionView() {
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div>
+    <div role="group" aria-label={`${label}: ${value}`}>
       <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-muted">{label}</div>
       <div className="display text-[34px] font-black tabular">{value}</div>
     </div>
