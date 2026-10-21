@@ -60,7 +60,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Profile"
+                "$ref": "#/components/schemas/TemplateRequest"
               }
             }
           },
@@ -73,6 +73,48 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/TemplateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/program/advance": {
+      "post": {
+        "tags": [
+          "program"
+        ],
+        "summary": "Program Advance",
+        "description": "Once a week has ended, write the engine's suggested loads into the following weeks.\n\nIdempotent: returns the program unchanged (and no changes) if there's nothing new to apply.",
+        "operationId": "program_advance_program_advance_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MetricsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdvanceResponse"
                 }
               }
             }
@@ -185,6 +227,36 @@
   },
   "components": {
     "schemas": {
+      "AdvanceResponse": {
+        "properties": {
+          "program": {
+            "$ref": "#/components/schemas/Program"
+          },
+          "changes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Changes",
+            "description": "Human-readable prescription changes, e.g. 'W3 D1 bench: 185 -> 190 lb'"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Notes",
+            "description": "Guard notes from checking the updated weeks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "program",
+          "changes",
+          "notes"
+        ],
+        "title": "AdvanceResponse"
+      },
       "DeloadRules": {
         "properties": {
           "set_cut": {
@@ -452,6 +524,17 @@
             "type": "number",
             "title": "Avg Reps"
           },
+          "avg_rpe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Rpe"
+          },
           "pr": {
             "type": "boolean",
             "title": "Pr",
@@ -468,6 +551,7 @@
           "load",
           "reps",
           "avg_reps",
+          "avg_rpe",
           "pr",
           "deload"
         ],
@@ -798,11 +882,26 @@
             "description": "Primary muscle = 1 per hard set, secondary = 0.5"
           },
           "target_low": {
-            "type": "number",
-            "title": "Target Low"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Low",
+            "description": "None for tracked-only muscles (abs, lower back, calves)"
           },
           "target_max": {
-            "type": "number",
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Target Max"
           },
           "status": {
@@ -811,7 +910,8 @@
               "below",
               "in_range",
               "above",
-              "deload"
+              "deload",
+              "no_target"
             ],
             "title": "Status"
           }
@@ -1010,6 +1110,13 @@
             "title": "Units",
             "default": "lb"
           },
+          "adjusted_through": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Adjusted Through",
+            "description": "Last week whose results have been applied to later weeks' prescriptions",
+            "default": 0
+          },
           "weeks": {
             "items": {
               "$ref": "#/components/schemas/Week"
@@ -1095,6 +1202,19 @@
       },
       "SetLog": {
         "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id",
+            "description": "Stable client-side id for this row"
+          },
           "block": {
             "type": "integer",
             "minimum": 1.0,
@@ -1224,6 +1344,21 @@
             "type": "number",
             "title": "Reduce Fraction"
           },
+          "large_jump_fraction": {
+            "type": "number",
+            "title": "Large Jump Fraction"
+          },
+          "overshoot_reps": {
+            "type": "integer",
+            "title": "Overshoot Reps"
+          },
+          "volume_target_muscles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Volume Target Muscles"
+          },
           "deload_every_weeks": {
             "type": "integer",
             "title": "Deload Every Weeks"
@@ -1246,6 +1381,9 @@
           "e1rm_plateau_threshold",
           "rpe_tolerance",
           "reduce_fraction",
+          "large_jump_fraction",
+          "overshoot_reps",
+          "volume_target_muscles",
           "deload_every_weeks",
           "max_weekly_increase",
           "max_weekly_decrease"
@@ -1279,6 +1417,11 @@
             "title": "Regressing",
             "description": "Performance dropped two exposures in a row"
           },
+          "in_progress": {
+            "type": "boolean",
+            "title": "In Progress",
+            "description": "The latest session for this slot isn't finished; next_step/suggestions are the target for THAT session (from the last finished one) rather than the next session"
+          },
           "next_step": {
             "type": "string",
             "enum": [
@@ -1302,7 +1445,8 @@
                 "type": "null"
               }
             ],
-            "title": "Suggested Load"
+            "title": "Suggested Load",
+            "description": "None = no working weight known yet; lifter picks one"
           },
           "suggested_reps": {
             "anyOf": [
@@ -1323,12 +1467,32 @@
           "exposures",
           "plateau",
           "regressing",
+          "in_progress",
           "next_step",
           "next_step_reason",
           "suggested_load",
           "suggested_reps"
         ],
         "title": "SlotMetrics"
+      },
+      "TemplateRequest": {
+        "properties": {
+          "profile": {
+            "$ref": "#/components/schemas/Profile"
+          },
+          "block": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Block",
+            "description": "Block number for the new program (previous block + 1)",
+            "default": 1
+          }
+        },
+        "type": "object",
+        "required": [
+          "profile"
+        ],
+        "title": "TemplateRequest"
       },
       "TemplateResponse": {
         "properties": {
@@ -1342,12 +1506,21 @@
             "type": "array",
             "title": "Notes",
             "description": "Guard notes/violations; empty for a healthy template"
+          },
+          "volume_shortfalls": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Volume Shortfalls",
+            "description": "Muscles the schedule can't bring to the starting volume (too few days/minutes)"
           }
         },
         "type": "object",
         "required": [
           "program",
-          "notes"
+          "notes",
+          "volume_shortfalls"
         ],
         "title": "TemplateResponse"
       },

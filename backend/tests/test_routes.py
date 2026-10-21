@@ -79,10 +79,19 @@ class TestSchemaValidation:
 def test_template_endpoint():
     profile = {"goal": "strength", "experience": "beginner", "days_per_week": 3, "session_minutes": 60,
                "equipment": ["barbell", "dumbbell"]}
-    res = client.post("/program/template", json=profile)
+    res = client.post("/program/template", json={"profile": profile, "block": 2})
     assert res.status_code == 200
     data = res.json()
     assert data["notes"] == [] and len(data["program"]["weeks"]) == 5
+    assert data["program"]["block"] == 2 and "volume_shortfalls" in data
+
+
+def test_advance_endpoint_is_idempotent():
+    demo = client.get("/demo").json()
+    body = {"goal": demo["profile"]["goal"], "program": demo["program"], "logs": demo["logs"]}
+    res = client.post("/program/advance", json=body)
+    assert res.status_code == 200
+    assert res.json()["changes"] == []          # the demo is already advanced through week 2
 
 
 def test_demo_endpoint_feeds_metrics():

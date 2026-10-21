@@ -25,10 +25,13 @@ from app.rules import (
     E1RM_MAX_REPS,
     E1RM_PLATEAU_THRESHOLD,
     HARD_SET_MAX_RIR,
+    LARGE_JUMP_FRACTION,
     MIN_LOAD_STEP,
+    OVERSHOOT_REPS,
     PLATEAU_WINDOW,
     REDUCE_FRACTION,
     RPE_TOLERANCE,
+    VOLUME_TARGET_MUSCLES,
     ExerciseRules,
     Goal,
     goal_rules,
@@ -57,6 +60,8 @@ SlotKey = tuple[int, str]           # (day, slot_id)
 
 TIMED_STEP_SECONDS = 5               # timed holds progress 5 s at a time, not 1
 
+Decision = tuple[NextStep, str, float | None, int | None]
+
 
 # ---------- Basic formulas ----------
 
@@ -69,12 +74,14 @@ def epley_e1rm(weight: float, reps: float) -> float:
     return round(weight * (1 + reps / 30), 1)
 
 
-def set_e1rm(weight: float, reps: int, rpe: float | None) -> float | None:
+def set_e1rm(weight: float, reps: int, rpe: float | None, assumed_rpe: float | None = None) -> float | None:
     """RPE-adjusted e1RM: a set of 5 @ RPE 8 is treated as a 7-rep max.
 
-    Returns None when reps + RIR exceeds the range where Epley is reliable.
+    Unrated sets use `assumed_rpe` (the prescription's target) when given, else count
+    as all-out. Returns None when reps + RIR exceeds the range where Epley is reliable.
     """
-    effective = reps + (rpe_to_rir(rpe) if rpe is not None else 0)
+    effort = rpe if rpe is not None else assumed_rpe
+    effective = reps + (rpe_to_rir(effort) if effort is not None else 0)
     if effective > E1RM_MAX_REPS:
         return None
     return epley_e1rm(weight, effective)
@@ -90,6 +97,12 @@ def floor_to_increment(load: float, units: Units) -> float:
     """Round down to a loadable weight (tolerant of float error: 224.9999 -> 225, not 220)."""
     inc = MIN_LOAD_STEP[units]
     return math.floor(load / inc + 1e-9) * inc
+
+
+def next_load(load: float, rules: ExerciseRules, units: Units) -> float:
+    """Load after a successful top-of-range: +load_step_pct rounded DOWN, but at least one min step."""
+    inc = MIN_LOAD_STEP[units]
+    return max(floor_to_increment(load * (1 + rules.load_step_pct), units), load + inc)
 
 
 def is_done(log: SetLog) -> bool:
@@ -133,9 +146,21 @@ def detect_performance_plateau(pr_flags: list[bool], window: int = PLATEAU_WINDO
     return not any(pr_flags[-window:])
 
 
-def detect_regression(scores: list[float]) -> bool:
-    """Performance dropped two exposures in a row."""
-    return len(scores) >= 3 and scores[-3] > scores[-2] > scores[-1]
+def is_drop(before: tuple[float, float, float | None], after: tuple[float, float, float | None]) -> bool:
+    """`after` is clearly worse than `before`: fewer reps at no more load, less load for no more
+    reps, or the same performance at least 1 RPE harder. A planned jump (more load, fewer
+    reps) is NOT a drop."""
+    (l0, r0, e0), (l1, r1, e1) = before, after
+    if l1 <= l0 and r1 < r0:
+        return True
+    if l1 < l0 and r1 <= r0:
+        return True
+    return l1 == l0 and r1 == r0 and e0 is not None and e1 is not None and e1 - e0 >= 1
+
+
+def detect_regression(points: list[tuple[float, float, float | None]]) -> bool:
+    """Performance dropped two exposures in a row (points are (load, avg_reps, avg_rpe))."""
+    return len(points) >= 3 and is_drop(points[-3], points[-2]) and is_drop(points[-2], points[-1])
 
 
 # ---------- Progression decision for one slot ----------
@@ -150,9 +175,30 @@ def is_short(sets: list[SetLog], rx: PrescribedExercise) -> bool:
     return any(not s.completed or s.reps < rx.reps for s in _working(sets, rx))
 
 
+def is_logged_in_full(sets: list[SetLog], rx: PrescribedExercise) -> bool:
+    """Every prescribed working set has been logged (done or failed)."""
+    return len({s.set_number for s in _working(sets, rx)}) >= rx.sets
+
+
 def _avg_rpe(sets: list[SetLog]) -> float | None:
     rated = [s.rpe for s in sets if s.rpe is not None]
     return mean(rated) if rated else None
+
+
+def _performance(sets: list[SetLog], rx: PrescribedExercise) -> tuple[float, float] | None:
+    """(working load, avg reps at that load) for completed working sets."""
+    done = [s for s in _working(sets, rx) if is_done(s)]
+    if not done:
+        return None
+    load = max(s.weight for s in done)
+    return load, mean(s.reps for s in done if s.weight == load)
+
+
+def improved(prev: tuple[float, float] | None, cur: tuple[float, float] | None) -> bool:
+    """More load than last time, or more reps at the same load."""
+    if prev is None or cur is None:
+        return False
+    return cur[0] > prev[0] or (cur[0] == prev[0] and cur[1] > prev[1])
 
 
 def suggest_next_step(
@@ -161,30 +207,50 @@ def suggest_next_step(
     rx: PrescribedExercise,
     sets: list[SetLog],
     units: Units,
-    short_last_time: bool = False,
-) -> tuple[NextStep, str, float, int]:
+    prev_sets: list[SetLog] | None = None,
+    prev_rx: PrescribedExercise | None = None,
+) -> Decision:
     """Decide the next session for one slot from its latest sets (double progression).
 
     Same weight, +1 rep on the weakest set, until every set reaches the top of
     the range at target effort; only then add weight and reset to the bottom.
+    If that weight step is a large relative jump (small lifts), first build
+    OVERSHOOT_REPS past the top. After a jump, sessions below the range are fine
+    as long as reps keep improving; "reduce" only fires when short twice AND stuck.
 
-    Returns (step, reason, suggested_load, suggested_reps).
-    `short_last_time` is whether the previous exposure was also short.
+    `prev_sets`/`prev_rx` are the previous non-deload exposure of the same slot.
+    Returns (step, reason, suggested_load, suggested_reps); load None = pick a weight.
     """
     inc = MIN_LOAD_STEP[units]
     working = [s for s in _working(sets, rx) if is_done(s)]
+    top = top_of_range(rules, rx.reps, rx.reps_max)
+
+    if not working and not rx.load:
+        return "hold", (
+            f"Pick a working weight you can do for {rx.reps}-{top} reps at RPE {rx.target_rpe:g}."
+        ), None, rx.reps
+
     load = max((s.weight for s in working), default=rx.load or 0.0)
-    bodyweight = info.equipment == "bodyweight" and not rx.load
+    bodyweight = info.equipment == "bodyweight" and load == 0
     avg_rpe = _avg_rpe(working)
     max_rpe = rx.target_rpe + RPE_TOLERANCE
-    top = top_of_range(rules, rx.reps, rx.reps_max)
+    weakest = min((s.reps for s in working), default=0)
     short = is_short(sets, rx)
 
-    if short and short_last_time:
+    prev_perf = _performance(prev_sets, prev_rx) if prev_sets and prev_rx else None
+    cur_perf = _performance(sets, rx)
+    getting_better = improved(prev_perf, cur_perf)
+    short_before = bool(prev_sets and prev_rx and is_short(prev_sets, prev_rx))
+
+    if short and short_before and not getting_better:
         if bodyweight:
-            return "reduce", "Missed reps two sessions in a row; use an easier variation or fewer reps.", 0.0, rx.reps
-        new = min(round_to_increment(load * (1 - REDUCE_FRACTION), units), load - inc)
-        return "reduce", f"Missed reps two sessions in a row; drop to {max(new, 0):g} {units}.", max(new, 0.0), rx.reps
+            return "reduce", (
+                "Missed reps two sessions in a row without improving; use an easier variation or fewer reps."
+            ), 0.0, rx.reps
+        new = max(min(round_to_increment(load * (1 - REDUCE_FRACTION), units), load - inc), 0.0)
+        return "reduce", (
+            f"Missed reps two sessions in a row without improving; drop to {new:g} {units}."
+        ), new, rx.reps
 
     if rx.load and load < rx.load:
         return "hold", (
@@ -192,28 +258,42 @@ def suggest_next_step(
         ), rx.load, rx.reps
 
     if short:
+        if getting_better and working:
+            target = min(weakest + 1, top)
+            return "add_reps", (
+                f"Below the {rx.reps}-{top} range but improving; stay at {load:g} {units} and aim for "
+                f"{target} reps on your weakest set."
+            ), load, target
         return "hold", f"Missed prescribed reps; repeat {load:g} {units}.", load, rx.reps
 
     if len(working) < rx.sets:
         return "hold", f"Only {len(working)} of {rx.sets} sets logged; repeat {load:g} {units}.", load, rx.reps
 
-    if all(s.reps >= top for s in working):
+    # How far reps must go before a weight jump (overshoot for large relative jumps).
+    jump_top = top
+    new = next_load(load, rules, units)
+    if not info.timed and not bodyweight and load > 0 and (new - load) / load > LARGE_JUMP_FRACTION:
+        jump_top = min(top + OVERSHOOT_REPS, int(rules.reps_limit.high))
+
+    if all(s.reps >= jump_top for s in working):
         if avg_rpe is not None and avg_rpe > max_rpe:
             return "hold", (
-                f"Hit {top} reps on every set but avg RPE {avg_rpe:.1f} is over target {rx.target_rpe:g}; "
+                f"Hit {jump_top} reps on every set but avg RPE {avg_rpe:.1f} is over target {rx.target_rpe:g}; "
                 f"repeat until the top reps feel like RPE {rx.target_rpe:g}."
-            ), load, top
+            ), load, jump_top
         if bodyweight:
             return "add_load", (
                 f"Hit {top} reps on every set; add external load or move to a harder variation."
             ), 0.0, rx.reps
-        new = max(round_to_increment(load * (1 + rules.load_step_pct), units), load + inc)
+        if info.timed:
+            return "add_load", (
+                f"Every hold reached {top}s; move to a harder variation."
+            ), load, rx.reps
         return "add_load", (
-            f"Hit the top of {rx.reps}-{top} on every set at target effort; "
-            f"increase to {new:g} {units} and reset to {rx.reps} reps."
+            f"Hit {jump_top} reps on every set at target effort; increase to {new:g} {units} and "
+            f"reset to {rx.reps} reps."
         ), new, rx.reps
 
-    weakest = min(s.reps for s in working)
     if avg_rpe is not None and avg_rpe > max_rpe:
         return "hold", (
             f"Avg RPE {avg_rpe:.1f} is over target {rx.target_rpe:g}; repeat {weakest}+ reps at "
@@ -226,10 +306,15 @@ def suggest_next_step(
             f"Aim for {target}s on your shortest hold. Move to a harder variation once every hold reaches {top}s."
         ), load, target
 
-    target = min(weakest + 1, top)
+    target = min(weakest + 1, jump_top)
+    if jump_top > top and weakest >= top:
+        return "add_reps", (
+            f"Top of the range reached, but the next step ({load:g} -> {new:g} {units}) is a "
+            f"{(new - load) / load:.0%} jump. Build to {jump_top} reps on every set first; aim for {target}."
+        ), load, target
     return "add_reps", (
         f"Stay at {load:g} {units}; aim for {target} reps on your weakest set. "
-        f"Add weight once every set reaches {top}."
+        f"Add weight once every set reaches {jump_top}."
     ), load, target
 
 
@@ -241,7 +326,7 @@ def _info(exercise_id: str) -> ExerciseInfo:
     )
 
 
-class _Index:
+class PrescriptionIndex:
     """Lookup of prescriptions by (week, day, slot_id)."""
 
     def __init__(self, program: Program):
@@ -278,44 +363,70 @@ def _slot_metrics(
 ) -> SlotMetrics:
     exposures: list[Exposure] = []
     for week in sorted(by_week):
-        done = [s for s in _working(by_week[week], rx_by_week[week]) if is_done(s)]
+        rx = rx_by_week[week]
+        done = [s for s in _working(by_week[week], rx) if is_done(s)]
         if not done:
             continue
         load = max(s.weight for s in done)
-        reps = [s.reps for s in sorted(done, key=lambda s: s.set_number) if s.weight == load]
-        exposures.append(Exposure(week=week, load=load, reps=reps, avg_reps=round(mean(reps), 2),
-                                  pr=False, deload=week in deload_weeks))
+        at_load = [s for s in sorted(done, key=lambda s: s.set_number) if s.weight == load]
+        avg_rpe = _avg_rpe(at_load)
+        exposures.append(Exposure(
+            week=week, load=load, reps=[s.reps for s in at_load],
+            avg_reps=round(mean(s.reps for s in at_load), 2),
+            avg_rpe=round(avg_rpe, 2) if avg_rpe is not None else None,
+            pr=False, deload=week in deload_weeks,
+        ))
 
     trend = [e for e in exposures if not e.deload]
     for e, pr in zip(trend, mark_prs([(e.load, e.avg_reps) for e in trend])):
         e.pr = pr
 
     plateau = rules.plateau_metric == "performance" and detect_performance_plateau([e.pr for e in trend])
-    regressing = detect_regression([e.load * (1 + e.avg_reps / 30) for e in trend])
+    regressing = detect_regression([(e.load, e.avg_reps, e.avg_rpe) for e in trend])
+
+    def decide(week: int, prev: int | None) -> Decision:
+        return suggest_next_step(
+            rules, info, rx_by_week[week], by_week[week], units,
+            by_week[prev] if prev is not None else None,
+            rx_by_week[prev] if prev is not None else None,
+        )
 
     weeks_logged = sorted(by_week)
-    if not weeks_logged:
-        step, reason, load, reps = "hold", "No sets logged yet.", None, None
-    else:
-        last = weeks_logged[-1]
+    hard = [w for w in weeks_logged if w not in deload_weeks]
+    last = weeks_logged[-1]
+    in_progress = False
+
+    if last in deload_weeks:
         rx = rx_by_week[last]
-        if last in deload_weeks:
-            step, reason, load, reps = "hold", "Deload week; resume progression next week.", rx.load, rx.reps
+        step, reason, load, reps = "hold", "Deload week; resume progression next week.", rx.load, rx.reps
+    elif not is_logged_in_full(by_week[last], rx_by_week[last]):
+        # Session underway: show the target for it, decided from the last finished exposure.
+        in_progress = True
+        finished = [w for w in hard if w < last]
+        if finished:
+            prev = finished[-2] if len(finished) >= 2 else None
+            step, reason, load, reps = decide(finished[-1], prev)
+            reason = f"This session: {reason}"
         else:
-            hard_weeks = [w for w in weeks_logged if w not in deload_weeks]
-            prev = hard_weeks[-2] if len(hard_weeks) >= 2 else None
-            short_before = prev is not None and is_short(by_week[prev], rx_by_week[prev])
-            step, reason, load, reps = suggest_next_step(
-                rules, info, rx, by_week[last], units, short_before
-            )
+            rx = rx_by_week[last]
+            top = top_of_range(rules, rx.reps, rx.reps_max)
+            step, load, reps = "hold", rx.load, rx.reps
+            reason = (f"First session: work in {rx.reps}-{top} reps at RPE {rx.target_rpe:g}"
+                      + (f" with {rx.load:g} {units}." if rx.load else "; pick a working weight."))
+    else:
+        prev = hard[-2] if len(hard) >= 2 else None
+        step, reason, load, reps = decide(last, prev)
 
     return SlotMetrics(
         slot_id=key[1], day=key[0], exposures=exposures, plateau=plateau, regressing=regressing,
-        next_step=step, next_step_reason=reason, suggested_load=load, suggested_reps=reps,
+        in_progress=in_progress, next_step=step, next_step_reason=reason,
+        suggested_load=load, suggested_reps=reps,
     )
 
 
-def _volume_status(hard_sets: float, low: float, high: float, deload: bool) -> VolumeStatus:
+def _volume_status(muscle: str, hard_sets: float, low: float, high: float, deload: bool) -> VolumeStatus:
+    if muscle not in VOLUME_TARGET_MUSCLES:
+        return "no_target"
     if deload:
         return "deload"
     if hard_sets < low:
@@ -326,7 +437,7 @@ def _volume_status(hard_sets: float, low: float, high: float, deload: bool) -> V
 
 
 def compute_metrics(goal: Goal, program: Program, logs: list[SetLog]) -> Metrics:
-    index = _Index(program)
+    index = PrescriptionIndex(program)
     units = program.units
     deload_weeks = {w.week for w in program.weeks if w.is_deload}
     volume_rules = goal_rules(goal).volume
@@ -370,7 +481,7 @@ def compute_metrics(goal: Goal, program: Program, logs: list[SetLog]) -> Metrics
 
         if is_done(log):
             tonnage[log.week] += log.weight * log.reps
-            e1rm = set_e1rm(log.weight, log.reps, log.rpe)
+            e1rm = set_e1rm(log.weight, log.reps, log.rpe, rx.target_rpe if rx else None)
             if e1rm:
                 k = (log.week, log.day)
                 e1rm_points[lift][k] = max(e1rm_points[lift].get(k, 0.0), e1rm)
@@ -443,14 +554,15 @@ def compute_metrics(goal: Goal, program: Program, logs: list[SetLog]) -> Metrics
         for w in weeks
     ]
 
-    muscle_volume = [
-        MuscleVolume(
+    muscle_volume = []
+    for (w, m), v in sorted(muscle_sets.items()):
+        targeted = m in VOLUME_TARGET_MUSCLES
+        muscle_volume.append(MuscleVolume(
             week=w, muscle=m, hard_sets=v,
-            target_low=volume_rules.start.low, target_max=volume_rules.max,
-            status=_volume_status(v, volume_rules.start.low, volume_rules.max, w in deload_weeks),
-        )
-        for (w, m), v in sorted(muscle_sets.items())
-    ]
+            target_low=volume_rules.start.low if targeted else None,
+            target_max=volume_rules.max if targeted else None,
+            status=_volume_status(m, v, volume_rules.start.low, volume_rules.max, w in deload_weeks),
+        ))
 
     # A prescribed session counts as skipped if it has no logs but a later one does.
     skipped: list[str] = []

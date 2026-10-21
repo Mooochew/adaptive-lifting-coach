@@ -7,15 +7,18 @@ Builds a 4-week block + deload week from a Profile:
   - starting loads come from the lifter's lift estimates; unknown loads stay
     empty so the lifter picks a working weight on the first session
   - sessions are trimmed to fit the time budget, accessories first
+  - sets are then added (or a fitting accessory) until every major muscle reaches the
+    goal's starting weekly volume, and later weeks ramp by the goal's minimum ramp;
+    muscles the schedule can't fit are reported as shortfalls, never hidden
   - the deload week cuts sets and effort per the goal's deload rules
 Every week is passed through the guards, so templates can't break the rules.
 
 Templates are also the fallback when the AI is unavailable.
 """
 
-from app.exercises import ExerciseInfo, get_exercise
-from app.guards import guard_week
-from app.rules import ExerciseRules, goal_rules, rules_for_exercise
+from app.exercises import ExerciseInfo, get_exercise, muscle_credits
+from app.guards import guard_week, weekly_muscle_sets
+from app.rules import VOLUME_TARGET_MUSCLES, ExerciseRules, goal_rules, rules_for_exercise
 from app.schemas import PrescribedExercise, Profile, Program, Session, Week
 from app.training import floor_to_increment
 
@@ -130,6 +133,22 @@ def _session_minutes(exercises: list[PrescribedExercise]) -> float:
     return sum(ex.sets * (ex.rest_sec + WORK_SECONDS_PER_SET) / 60 for ex in exercises)
 
 
+def make_prescription(slot_id: str, info: ExerciseInfo, profile: Profile, sets: int) -> PrescribedExercise:
+    rules = rules_for_exercise(profile.goal, info)
+    reps, reps_max = (30, 60) if info.timed else template_rep_range(rules)
+    rpe = template_target_rpe(rules)
+    return PrescribedExercise(
+        slot_id=slot_id,
+        exercise_id=info.id,
+        sets=sets,
+        reps=reps,
+        reps_max=reps_max,
+        load=starting_load(profile, info, reps, rpe),
+        target_rpe=rpe,
+        rest_sec=REST_SEC[info.kind],
+    )
+
+
 def build_session(day: int, name: str, slots: list[str], profile: Profile) -> Session:
     sets = SETS_PER_EXERCISE[profile.days_per_week]
     used: set[str] = set()
@@ -140,28 +159,110 @@ def build_session(day: int, name: str, slots: list[str], profile: Profile) -> Se
         if info is None:
             continue
         used.add(info.id)
-        rules = rules_for_exercise(profile.goal, info)
-        if info.timed:
-            reps, reps_max = 30, 60
-        else:
-            reps, reps_max = template_rep_range(rules)
-        rpe = template_target_rpe(rules)
-        exercises.append(PrescribedExercise(
-            slot_id=slot,
-            exercise_id=info.id,
-            sets=sets,
-            reps=reps,
-            reps_max=reps_max,
-            load=starting_load(profile, info, reps, rpe),
-            target_rpe=rpe,
-            rest_sec=REST_SEC[info.kind],
-        ))
+        exercises.append(make_prescription(slot, info, profile, sets))
 
     # Fit the time budget: drop from the end (isolation work goes first).
     while len(exercises) > MIN_EXERCISES_PER_SESSION and _session_minutes(exercises) > profile.session_minutes:
         exercises.pop()
 
     return Session(day=day, focus=name, exercises=exercises)
+
+
+# ---------- Volume sizing ----------
+
+MAX_SETS_PER_EXERCISE = 5
+EXTRA_EXERCISE_SETS = 2
+
+# Accessories that can be added to a session to reach a muscle's volume, best first.
+ACCESSORIES: dict[str, list[str]] = {
+    "chest": ["incline_db_press", "db_bench_press", "dip", "push_up"],
+    "lats": ["lat_pulldown", "pull_up", "db_row"],
+    "upper_back": ["seated_cable_row", "db_row", "face_pull"],
+    "front_delts": ["db_shoulder_press", "overhead_press"],
+    "side_delts": ["lateral_raise"],
+    "rear_delts": ["face_pull"],
+    "triceps": ["triceps_pushdown", "dip", "close_grip_bench"],
+    "biceps": ["db_curl"],
+    "quads": ["leg_extension", "leg_press", "goblet_squat", "bulgarian_split_squat"],
+    "hamstrings": ["leg_curl", "romanian_deadlift"],
+    "glutes": ["bulgarian_split_squat", "romanian_deadlift", "kb_swing"],
+}
+
+
+def _fits(week: Week, session: Session, extra_minutes: float, minutes: int) -> bool:
+    return _session_minutes(session.exercises) + extra_minutes <= minutes
+
+
+def _within_caps(week: Week, change: dict[str, float], volume_max: float,
+                 previous: dict[str, float] | None, ramp_max: float) -> bool:
+    """Adding `change` (muscle -> sets) keeps every muscle under the weekly max and ramp limit."""
+    current = weekly_muscle_sets(week)
+    for muscle, add in change.items():
+        after = current.get(muscle, 0.0) + add
+        if after > volume_max:
+            return False
+        if previous is not None and after - previous.get(muscle, 0.0) > ramp_max:
+            return False
+    return True
+
+
+def _add_set_for(muscle: str, week: Week, profile: Profile, previous: dict[str, float] | None) -> bool:
+    """Add one set to an exercise training `muscle` directly, or add a fitting accessory."""
+    volume = goal_rules(profile.goal).volume
+    kind_order = {"isolation": 0, "compound": 1, "main": 2}   # grow accessories before main lifts
+
+    candidates = []
+    for session in week.sessions:
+        for ex in session.exercises:
+            info = get_exercise(ex.exercise_id)
+            if muscle in info.primary and ex.sets < MAX_SETS_PER_EXERCISE:
+                candidates.append((kind_order[info.kind], ex.sets, session, ex, info))
+    for _, _, session, ex, info in sorted(candidates, key=lambda c: (c[0], c[1])):
+        one_set = (ex.rest_sec + WORK_SECONDS_PER_SET) / 60
+        if (_fits(week, session, one_set, profile.session_minutes)
+                and _within_caps(week, muscle_credits(info.id), volume.max, previous, volume.ramp.high)):
+            ex.sets += 1
+            return True
+
+    available = set(profile.equipment) | {"bodyweight"}
+    # Prefer sessions that already train this muscle (presses on upper days), then the least busy one.
+    trains = lambda s: any(muscle in muscle_credits(ex.exercise_id) for ex in s.exercises)
+    by_free_time = sorted(week.sessions, key=lambda s: (not trains(s), _session_minutes(s.exercises)))
+    for exercise_id in ACCESSORIES.get(muscle, []):
+        info = get_exercise(exercise_id)
+        if info.equipment not in available:
+            continue
+        for session in by_free_time:
+            if any(ex.exercise_id == exercise_id for ex in session.exercises):
+                continue
+            new = make_prescription(f"x_{exercise_id}", info, profile, EXTRA_EXERCISE_SETS)
+            minutes = new.sets * (new.rest_sec + WORK_SECONDS_PER_SET) / 60
+            change = {m: c * new.sets for m, c in muscle_credits(exercise_id).items()}
+            if (_fits(week, session, minutes, profile.session_minutes)
+                    and _within_caps(week, change, volume.max, previous, volume.ramp.high)):
+                session.exercises.append(new)
+                return True
+    return False
+
+
+def fill_volume(week: Week, profile: Profile, target: float, previous: Week | None = None) -> list[str]:
+    """Raise every targeted muscle to `target` weekly sets where the schedule allows.
+
+    Returns shortfalls for muscles that can't get there (too few days/minutes/equipment).
+    """
+    previous_sets = weekly_muscle_sets(previous) if previous else None
+    stuck: set[str] = set()
+    for _ in range(500):
+        current = weekly_muscle_sets(week)
+        short = [m for m in VOLUME_TARGET_MUSCLES if current.get(m, 0.0) < target and m not in stuck]
+        if not short:
+            break
+        muscle = max(short, key=lambda m: target - current.get(m, 0.0))
+        if not _add_set_for(muscle, week, profile, previous_sets):
+            stuck.add(muscle)
+    current = weekly_muscle_sets(week)
+    return [f"{m}: {current.get(m, 0.0):g} of {target:g} weekly sets (not enough time or equipment)"
+            for m in sorted(stuck)]
 
 
 def deload_week(week: Week, profile: Profile) -> Week:
@@ -183,14 +284,26 @@ def deload_week(week: Week, profile: Profile) -> Week:
     return Week(week=BLOCK_WEEKS + 1, is_deload=True, sessions=sessions)
 
 
-def build_template(profile: Profile, block: int = 1) -> tuple[Program, list[str]]:
-    """Return the program plus any guard notes/violations (expected to be empty)."""
+def build_template(profile: Profile, block: int = 1) -> tuple[Program, list[str], list[str]]:
+    """Return (program, guard notes/violations, volume shortfalls).
+
+    Week 1 starts every targeted muscle at the goal's starting volume; each later
+    hard week ramps the target by the goal's minimum ramp (hypertrophy +1 set/week,
+    strength flat). The deload week is built from week 1.
+    """
     split = SPLITS[profile.days_per_week]
+    volume = goal_rules(profile.goal).volume
     first = Week(week=1, sessions=[
         build_session(day, name, slots, profile) for day, (name, slots) in enumerate(split, start=1)
     ])
+    shortfalls = fill_volume(first, profile, volume.start.low)
 
-    weeks = [first] + [first.model_copy(update={"week": n}, deep=True) for n in range(2, BLOCK_WEEKS + 1)]
+    weeks = [first]
+    for n in range(2, BLOCK_WEEKS + 1):
+        week = weeks[-1].model_copy(update={"week": n}, deep=True)
+        target = min(volume.start.low + volume.ramp.low * (n - 1), volume.max)
+        fill_volume(week, profile, target, previous=weeks[-1])
+        weeks.append(week)
     weeks.append(deload_week(first, profile))
 
     issues: list[str] = []
@@ -200,6 +313,7 @@ def build_template(profile: Profile, block: int = 1) -> tuple[Program, list[str]
         result = guard_week(week, profile.goal, profile.units, previous=previous)
         issues += result.notes + result.violations
         checked.append(result.week)
-        previous = result.week
+        if not week.is_deload:
+            previous = result.week
 
-    return Program(block=block, units=profile.units, weeks=checked), issues
+    return Program(block=block, units=profile.units, weeks=checked), issues, shortfalls

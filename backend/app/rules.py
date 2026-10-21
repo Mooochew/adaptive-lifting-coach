@@ -77,6 +77,9 @@ class SharedRules(_Frozen):
     e1rm_plateau_threshold: float
     rpe_tolerance: float
     reduce_fraction: float
+    large_jump_fraction: float
+    overshoot_reps: int
+    volume_target_muscles: tuple[str, ...]
     deload_every_weeks: int
     max_weekly_increase: float
     max_weekly_decrease: float
@@ -151,6 +154,19 @@ E1RM_PLATEAU_THRESHOLD = 0.01        # e1RM gains under 1% count as noise
 RPE_TOLERANCE = 0.5                  # avg RPE may exceed target by this much and still progress
 REDUCE_FRACTION = 0.075              # "reduce" = ~5-10% load cut (min one MIN_LOAD_STEP)
 
+# Small lifts: when the next load step is a big relative jump (20 -> 25 lb is +25%),
+# build reps past the top of the range first so the new weight lands near the range,
+# and after any jump allow working below the range while reps keep improving.
+LARGE_JUMP_FRACTION = 0.10           # a step bigger than this share of the load is a "large jump"
+OVERSHOOT_REPS = 3                   # reps above the top of the range required before a large jump
+
+# Muscles with weekly volume targets. Abs, lower back and calves are tracked but get
+# no "below target" warning (mostly trained indirectly or optional for most lifters).
+VOLUME_TARGET_MUSCLES: tuple[str, ...] = (
+    "chest", "lats", "upper_back", "front_delts", "side_delts", "rear_delts",
+    "triceps", "biceps", "quads", "hamstrings", "glutes",
+)
+
 DELOAD_EVERY_WEEKS = 5               # scheduled: every 5th week since the last deload
 DELOAD_REGRESSION_MIN_LIFTS = 2      # reactive: performance dropping on at least 2 lifts...
 DELOAD_REGRESSION_FRACTION = 1 / 3   # ...and at least 1/3 of main + compound lifts
@@ -169,6 +185,9 @@ SHARED = SharedRules(
     e1rm_plateau_threshold=E1RM_PLATEAU_THRESHOLD,
     rpe_tolerance=RPE_TOLERANCE,
     reduce_fraction=REDUCE_FRACTION,
+    large_jump_fraction=LARGE_JUMP_FRACTION,
+    overshoot_reps=OVERSHOOT_REPS,
+    volume_target_muscles=VOLUME_TARGET_MUSCLES,
     deload_every_weeks=DELOAD_EVERY_WEEKS,
     max_weekly_increase=MAX_WEEKLY_INCREASE,
     max_weekly_decrease=MAX_WEEKLY_DECREASE,

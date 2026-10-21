@@ -44,6 +44,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/program/advance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Program Advance
+         * @description Once a week has ended, write the engine's suggested loads into the following weeks.
+         *
+         *     Idempotent: returns the program unchanged (and no changes) if there's nothing new to apply.
+         */
+        post: operations["program_advance_program_advance_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/demo": {
         parameters: {
             query?: never;
@@ -128,6 +150,20 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AdvanceResponse */
+        AdvanceResponse: {
+            program: components["schemas"]["Program"];
+            /**
+             * Changes
+             * @description Human-readable prescription changes, e.g. 'W3 D1 bench: 185 -> 190 lb'
+             */
+            changes: string[];
+            /**
+             * Notes
+             * @description Guard notes from checking the updated weeks
+             */
+            notes: string[];
+        };
         /** DeloadRules */
         DeloadRules: {
             /** Set Cut */
@@ -235,6 +271,8 @@ export interface components {
             reps: number[];
             /** Avg Reps */
             avg_reps: number;
+            /** Avg Rpe */
+            avg_rpe: number | null;
             /**
              * Pr
              * @description No earlier exposure had >= this load AND >= these average reps
@@ -372,15 +410,18 @@ export interface components {
              * @description Primary muscle = 1 per hard set, secondary = 0.5
              */
             hard_sets: number;
-            /** Target Low */
-            target_low: number;
+            /**
+             * Target Low
+             * @description None for tracked-only muscles (abs, lower back, calves)
+             */
+            target_low: number | null;
             /** Target Max */
-            target_max: number;
+            target_max: number | null;
             /**
              * Status
              * @enum {string}
              */
-            status: "below" | "in_range" | "above" | "deload";
+            status: "below" | "in_range" | "above" | "deload" | "no_target";
         };
         /** PrescribedExercise */
         PrescribedExercise: {
@@ -470,6 +511,12 @@ export interface components {
              * @enum {string}
              */
             units: "lb" | "kg";
+            /**
+             * Adjusted Through
+             * @description Last week whose results have been applied to later weeks' prescriptions
+             * @default 0
+             */
+            adjusted_through: number;
             /** Weeks */
             weeks: components["schemas"]["Week"][];
         };
@@ -502,6 +549,11 @@ export interface components {
         };
         /** SetLog */
         SetLog: {
+            /**
+             * Id
+             * @description Stable client-side id for this row
+             */
+            id?: string | null;
             /**
              * Block
              * @default 1
@@ -561,6 +613,12 @@ export interface components {
             rpe_tolerance: number;
             /** Reduce Fraction */
             reduce_fraction: number;
+            /** Large Jump Fraction */
+            large_jump_fraction: number;
+            /** Overshoot Reps */
+            overshoot_reps: number;
+            /** Volume Target Muscles */
+            volume_target_muscles: string[];
             /** Deload Every Weeks */
             deload_every_weeks: number;
             /** Max Weekly Increase */
@@ -587,16 +645,34 @@ export interface components {
              */
             regressing: boolean;
             /**
+             * In Progress
+             * @description The latest session for this slot isn't finished; next_step/suggestions are the target for THAT session (from the last finished one) rather than the next session
+             */
+            in_progress: boolean;
+            /**
              * Next Step
              * @enum {string}
              */
             next_step: "add_load" | "add_reps" | "hold" | "reduce";
             /** Next Step Reason */
             next_step_reason: string;
-            /** Suggested Load */
+            /**
+             * Suggested Load
+             * @description None = no working weight known yet; lifter picks one
+             */
             suggested_load: number | null;
             /** Suggested Reps */
             suggested_reps: number | null;
+        };
+        /** TemplateRequest */
+        TemplateRequest: {
+            profile: components["schemas"]["Profile"];
+            /**
+             * Block
+             * @description Block number for the new program (previous block + 1)
+             * @default 1
+             */
+            block: number;
         };
         /** TemplateResponse */
         TemplateResponse: {
@@ -606,6 +682,11 @@ export interface components {
              * @description Guard notes/violations; empty for a healthy template
              */
             notes: string[];
+            /**
+             * Volume Shortfalls
+             * @description Muscles the schedule can't bring to the starting volume (too few days/minutes)
+             */
+            volume_shortfalls: string[];
         };
         /** ValidationError */
         ValidationError: {
@@ -711,7 +792,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["Profile"];
+                "application/json": components["schemas"]["TemplateRequest"];
             };
         };
         responses: {
@@ -722,6 +803,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TemplateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    program_advance_program_advance_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MetricsRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdvanceResponse"];
                 };
             };
             /** @description Validation Error */

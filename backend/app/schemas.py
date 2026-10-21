@@ -105,6 +105,10 @@ class Week(BaseModel):
 class Program(BaseModel):
     block: int = Field(default=1, ge=1, description="Training block number; logs carry the same number")
     units: Units = "lb"
+    adjusted_through: int = Field(
+        default=0, ge=0,
+        description="Last week whose results have been applied to later weeks' prescriptions",
+    )
     weeks: list[Week] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -118,6 +122,7 @@ class Program(BaseModel):
 # ---------- Logging ----------
 
 class SetLog(BaseModel):
+    id: str | None = Field(default=None, max_length=64, description="Stable client-side id for this row")
     block: int = Field(default=1, ge=1)
     week: int = Field(ge=1, le=16)
     day: int = Field(ge=1, le=7)
@@ -149,6 +154,7 @@ class Exposure(BaseModel):
     load: float = Field(description="Working load (heaviest working set)")
     reps: list[int] = Field(description="Reps of each working set at that load, in set order")
     avg_reps: float
+    avg_rpe: float | None
     pr: bool = Field(description="No earlier exposure had >= this load AND >= these average reps")
     deload: bool
 
@@ -160,9 +166,13 @@ class SlotMetrics(BaseModel):
     plateau: bool = Field(description="No rep or load PR in recent exposures (hypertrophy-style lifts; "
                                       "strength main lifts use e1RM at the lift level)")
     regressing: bool = Field(description="Performance dropped two exposures in a row")
+    in_progress: bool = Field(
+        description="The latest session for this slot isn't finished; next_step/suggestions are the "
+                    "target for THAT session (from the last finished one) rather than the next session",
+    )
     next_step: NextStep
     next_step_reason: str
-    suggested_load: float | None
+    suggested_load: float | None = Field(description="None = no working weight known yet; lifter picks one")
     suggested_reps: int | None
 
 
@@ -183,15 +193,15 @@ class LiftMetrics(BaseModel):
     slots: list[SlotMetrics]
 
 
-VolumeStatus = Literal["below", "in_range", "above", "deload"]
+VolumeStatus = Literal["below", "in_range", "above", "deload", "no_target"]
 
 
 class MuscleVolume(BaseModel):
     week: int
     muscle: str
     hard_sets: float = Field(description="Primary muscle = 1 per hard set, secondary = 0.5")
-    target_low: float
-    target_max: float
+    target_low: float | None = Field(description="None for tracked-only muscles (abs, lower back, calves)")
+    target_max: float | None
     status: VolumeStatus
 
 
@@ -230,9 +240,23 @@ class MetricsRequest(BaseModel):
 
 # ---------- Programs ----------
 
+class TemplateRequest(BaseModel):
+    profile: Profile
+    block: int = Field(default=1, ge=1, description="Block number for the new program (previous block + 1)")
+
+
 class TemplateResponse(BaseModel):
     program: Program
     notes: list[str] = Field(description="Guard notes/violations; empty for a healthy template")
+    volume_shortfalls: list[str] = Field(
+        description="Muscles the schedule can't bring to the starting volume (too few days/minutes)",
+    )
+
+
+class AdvanceResponse(BaseModel):
+    program: Program
+    changes: list[str] = Field(description="Human-readable prescription changes, e.g. 'W3 D1 bench: 185 -> 190 lb'")
+    notes: list[str] = Field(description="Guard notes from checking the updated weeks")
 
 
 class DemoAthlete(BaseModel):

@@ -23,7 +23,7 @@ from app.rules import (
     rules_for_exercise,
     target_rpe_range,
 )
-from app.schemas import Program, Units, Week
+from app.schemas import Program, SlotMetrics, Units, Week
 from app.training import round_to_increment
 
 
@@ -103,11 +103,15 @@ def guard_week(
     units: Units,
     previous: Week | None = None,
     last_loads: dict[str, float] | None = None,
+    slot_metrics: dict[tuple[int, str], SlotMetrics] | None = None,
 ) -> GuardResult:
     """Clamp an LLM-proposed week to the training rules.
 
     `previous` is last week's prescription; `last_loads` is the most recent
     logged working load per exercise, used when a lift has no previous slot.
+    `slot_metrics` ((day, slot_id) -> the engine's decision for that slot) enforces
+    double progression: weight may only rise where the engine says "add_load",
+    and never above the engine's suggested load.
     """
     ensure_known_exercises(proposed)
     rules_for_goal = goal_rules(goal)
@@ -171,6 +175,17 @@ def guard_week(
                 reason = f"capped vs {before:g}" if before > 0 else "rounded to nearest loadable weight"
                 notes.append(f"{where}: load {ex.load:g} -> {clamped:g} {units} ({reason}).")
                 ex.load = clamped
+
+            # Double progression: no weight increase unless the engine earned it.
+            if slot_metrics is not None and before > 0 and ex.load > before and not week.is_deload:
+                decision = slot_metrics.get((session.day, ex.slot_id))
+                earned = decision is not None and decision.next_step == "add_load" and decision.suggested_load
+                allowed = min(ex.load, decision.suggested_load) if earned else before
+                if ex.load > allowed:
+                    why = ("capped at the engine's suggested load" if earned else
+                           "weight only goes up once every set reaches the top of the rep range")
+                    notes.append(f"{where}: load {ex.load:g} -> {allowed:g} {units} ({why}).")
+                    ex.load = allowed
 
     # Weekly volume per muscle
     if not week.is_deload:

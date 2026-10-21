@@ -99,9 +99,15 @@ class TestPlateauHelpers:
         assert detect_performance_plateau([True, True, False, False, False]) is True
         assert detect_performance_plateau([True, False, False, True]) is False
 
-    def test_regression(self):
-        assert detect_regression([200, 195, 190]) is True
-        assert detect_regression([200, 195, 196]) is False
+    def test_regression_needs_two_real_drops(self):
+        # (load, avg reps, avg rpe)
+        assert detect_regression([(185, 5, 8), (185, 4, 8), (185, 3, 8)]) is True
+        assert detect_regression([(185, 5, 8), (185, 4, 8), (185, 4.5, 8)]) is False
+        assert detect_regression([(185, 5, 8), (185, 5, 9), (185, 5, 10)]) is True    # same reps, much harder
+
+    def test_planned_jump_is_not_a_regression(self):
+        """Reviewer minor: a reset to the bottom of the range after a weight jump isn't a drop."""
+        assert detect_regression([(185, 10, 8), (190, 6, 8), (190, 5.67, 8)]) is False
 
 
 class TestNextStepStrength:
@@ -109,8 +115,9 @@ class TestNextStepStrength:
     info = get_exercise("bench_press")
     rx = bench_rx(reps=3, reps_max=5)
 
-    def step(self, sets, rx=None, short_before=False):
-        return suggest_next_step(STRENGTH_MAIN, self.info, rx or self.rx, sets, "lb", short_before)
+    def step(self, sets, rx=None, prev=None):
+        rx = rx or self.rx
+        return suggest_next_step(STRENGTH_MAIN, self.info, rx, sets, "lb", prev, rx if prev else None)
 
     def test_good_session_inside_range_adds_reps_not_weight(self):
         step, _, load, reps = self.step(bench_sets(1, 185, 4, 8))
@@ -124,9 +131,12 @@ class TestNextStepStrength:
         step, _, load, reps = self.step(bench_sets(1, 185, 5, 8))
         assert step == "add_load" and load == 190 and reps == 3     # +2.5%, reset to bottom
 
-    def test_main_lift_step_is_percentage(self):
+    def test_main_lift_step_rounds_down(self):
         rx = bench_rx(reps=3, reps_max=5, load=315)
-        assert self.step(bench_sets(1, 315, 5, 8), rx)[2] == 325     # 315 * 1.025 = 322.9 -> 325
+        assert self.step(bench_sets(1, 315, 5, 8), rx)[2] == 320     # 315 * 1.025 = 322.9 -> DOWN to 320
+
+    def test_main_lift_step_is_at_least_one_min_step(self):
+        assert self.step(bench_sets(1, 185, 5, 8))[2] == 190          # 189.6 -> 185, but min +5
 
     def test_default_window_when_no_top_given(self):
         # 3x5 with no reps_max -> range 5-7, so 5 reps is not yet a reason to add weight
@@ -148,9 +158,18 @@ class TestNextStepStrength:
     def test_hold_when_below_bottom(self):
         assert self.step(bench_sets(1, 185, 2, 10))[0] == "hold"
 
-    def test_reduce_when_missed_twice(self):
-        step, _, load, _ = self.step(bench_sets(2, 185, 2, 10), short_before=True)
+    def test_reduce_when_short_twice_and_stuck(self):
+        step, _, load, _ = self.step(bench_sets(2, 185, 2, 10), prev=bench_sets(1, 185, 2, 10))
         assert step == "reduce" and load == 170       # 185 * 0.925 = 171.1 -> 170
+
+    def test_no_reduce_while_reps_improve(self):
+        """Reviewer M2: short twice but improving -> keep going, don't cut the weight."""
+        step, _, load, reps = self.step(bench_sets(2, 185, [3, 2, 2], 9), prev=bench_sets(1, 185, 2, 9))
+        assert step == "add_reps" and load == 185 and reps == 3
+
+    def test_below_range_right_after_a_jump_is_patience_not_failure(self):
+        step, reason, load, _ = self.step(bench_sets(2, 190, [3, 2, 2], 9), prev=bench_sets(1, 185, 5, 8))
+        assert step == "add_reps" and load == 190 and "improving" in reason
 
     def test_lighter_than_prescribed_is_not_success(self):
         step, _, load, _ = self.step(bench_sets(1, 135, 5, 6))
@@ -161,26 +180,47 @@ class TestNextStepStrength:
 
 
 class TestNextStepDoubleProgression:
+    """Lateral raise 3x12-15 @ RPE 9 at 20 lb. The next step (+5 lb) is +25%, so the overshoot rule applies."""
     info = get_exercise("lateral_raise")
 
-    def step(self, reps, rpe, rx=None):
-        sets = sets_of("lateral_raise", 1, 20, reps, rpe)
-        return suggest_next_step(HYPERTROPHY_ISOLATION, self.info, rx or lateral_rx(), sets, "lb")
+    def step(self, reps, rpe, rx=None, load=20):
+        sets = sets_of("lateral_raise", 1, load, reps, rpe)
+        return suggest_next_step(HYPERTROPHY_ISOLATION, self.info, rx or lateral_rx(load=load), sets, "lb")
 
     def test_add_reps_inside_range(self):
         step, _, load, reps = self.step(13, 9)
         assert step == "add_reps" and load == 20 and reps == 14
 
-    def test_add_load_at_top_resets_reps(self):
-        step, _, load, reps = self.step(15, 9)
+    def test_large_jump_requires_overshoot(self):
+        """Reviewer M2: 20 -> 25 lb is +25%; build to top + 3 (18) before jumping."""
+        step, reason, load, reps = self.step(15, 9)
+        assert step == "add_reps" and load == 20 and reps == 16 and "25% jump" in reason
+
+    def test_jump_after_overshoot(self):
+        step, _, load, reps = self.step(18, 9)
         assert step == "add_load" and load == 25 and reps == 12
+
+    def test_small_relative_step_jumps_at_top(self):
+        rx = PrescribedExercise(slot_id="curl", exercise_id="leg_curl", sets=3, reps=10, reps_max=15,
+                                load=90, target_rpe=9)
+        sets = sets_of("leg_curl", 1, 90, 15, 9)
+        step, _, load, _ = suggest_next_step(HYPERTROPHY_ISOLATION, get_exercise("leg_curl"), rx, sets, "lb")
+        assert step == "add_load" and load == 95           # +5.6%: no overshoot needed
 
     def test_top_reps_but_too_hard_holds(self):
         # target 9 + 0.5 tolerance; RPE 10 on every set is a grind
-        assert self.step(15, 10)[0] == "hold"
+        assert self.step(18, 10)[0] == "hold"
 
     def test_below_bottom_holds(self):
         assert self.step(10, 10)[0] == "hold"
+
+    def test_jump_then_improving_below_range_never_bounces_back(self):
+        """Reviewer M2 scenario: 25 x 8,8,7 then 25 x 9,9,8 must NOT reduce back to 20."""
+        rx = lateral_rx(load=25)
+        prev = sets_of("lateral_raise", 1, 25, [8, 8, 7], 9)
+        cur = sets_of("lateral_raise", 2, 25, [9, 9, 8], 9)
+        step, _, load, reps = suggest_next_step(HYPERTROPHY_ISOLATION, self.info, rx, cur, "lb", prev, rx)
+        assert step == "add_reps" and load == 25 and reps == 9
 
     def test_bodyweight_progression(self):
         rx = PrescribedExercise(slot_id="pullup", exercise_id="pull_up", sets=3, reps=6, reps_max=10,
@@ -189,10 +229,35 @@ class TestNextStepDoubleProgression:
         step, reason, load, _ = suggest_next_step(HYPERTROPHY_COMPOUND, get_exercise("pull_up"), rx, sets, "lb")
         assert step == "add_load" and load == 0 and "harder variation" in reason
 
+    def test_weighted_bodyweight_lift_progresses_the_added_weight(self):
+        """Reviewer minor: a pull-up done with +25 lb should suggest +30, not 0.
+        (25 -> 30 is +20%, so the overshoot rule wants 10 + 3 = 13 reps first.)"""
+        rx = PrescribedExercise(slot_id="pullup", exercise_id="pull_up", sets=3, reps=6, reps_max=10,
+                                load=0, target_rpe=8)
+        sets = sets_of("pull_up", 1, 25, 13, 8)
+        step, _, load, _ = suggest_next_step(HYPERTROPHY_COMPOUND, get_exercise("pull_up"), rx, sets, "lb")
+        assert step == "add_load" and load == 30
+
+    def test_unknown_load_with_failed_set_asks_for_a_weight(self):
+        """Reviewer m2: never suggest 0 lb for a loaded lift with no known weight."""
+        rx = PrescribedExercise(slot_id="row", exercise_id="barbell_row", sets=3, reps=6, reps_max=10,
+                                load=None, target_rpe=8)
+        failed = [SetLog(week=1, day=1, slot_id="row", exercise_id="barbell_row", set_number=1,
+                         weight=0, reps=0, completed=False)]
+        step, reason, load, _ = suggest_next_step(HYPERTROPHY_COMPOUND, get_exercise("barbell_row"), rx, failed, "lb")
+        assert step == "hold" and load is None and "Pick a working weight" in reason
+
+    def test_timed_hold_at_top_moves_to_harder_variation(self):
+        rx = PrescribedExercise(slot_id="core", exercise_id="plank", sets=3, reps=30, reps_max=60,
+                                load=0, target_rpe=8)
+        step, reason, _, _ = suggest_next_step(HYPERTROPHY_ISOLATION, get_exercise("plank"), rx,
+                                               sets_of("plank", 1, 0, 60, 8), "lb")
+        assert step == "add_load" and "harder variation" in reason
+
     def test_range_falls_back_to_default_window(self):
-        rx = lateral_rx(reps=10, reps_max=None)         # isolation window +5 -> 10-15
-        assert self.step(14, 9, rx)[0] == "add_reps"
-        assert self.step(15, 9, rx)[0] == "add_load"
+        rx = lateral_rx(reps=10, reps_max=None)         # isolation window +5 -> 10-15, overshoot -> 18
+        assert self.step(15, 9, rx)[0] == "add_reps"
+        assert self.step(18, 9, rx)[0] == "add_load"
 
 
 class TestComputeMetrics:
@@ -251,8 +316,38 @@ class TestComputeMetrics:
                 + sets_of("back_squat", 1, 275, 5, 7.5, slot_id="squat_backoff"))
         squat = lift(compute_metrics("strength", program, logs), "back_squat")
         slots = {s.slot_id: s for s in squat.slots}
-        assert slots["squat_top"].suggested_load == 325       # 315 * 1.025 = 322.9 -> 325
-        assert slots["squat_backoff"].suggested_load == 280   # 275 * 1.025 = 281.9 -> 280
+        assert slots["squat_top"].suggested_load == 320       # 315 * 1.025 = 322.9 -> down to 320
+        assert slots["squat_backoff"].suggested_load == 280   # 275 * 1.025 = 281.9 -> down to 280
+
+    def test_session_in_progress_shows_the_target_for_it(self, program):
+        """Reviewer m1: mid-session, show what to aim for (from last week), not 'only 2 of 3 logged'."""
+        # fixture bench: 3x5 (default window -> 5-7); last week 5,5,5 -> this session aim for 6
+        logs = bench_sets(1, 185, 5, 8) + bench_sets(2, 185, 6, 8, sets=2)
+        slot = lift(compute_metrics("strength", program, logs), "bench_press").slots[0]
+        assert slot.in_progress is True
+        assert slot.next_step == "add_reps" and slot.suggested_reps == 6
+        assert slot.next_step_reason.startswith("This session:")
+
+    def test_first_session_in_progress(self, program):
+        slot = lift(compute_metrics("strength", program, bench_sets(1, 185, 5, 8, sets=1)), "bench_press").slots[0]
+        assert slot.in_progress and slot.next_step == "hold" and slot.next_step_reason.startswith("First session")
+
+    def test_finished_session_is_not_in_progress(self, program):
+        slot = lift(compute_metrics("strength", program, bench_sets(1, 185, 4, 8)), "bench_press").slots[0]
+        assert slot.in_progress is False
+
+    def test_unrated_sets_use_target_rpe_for_e1rm(self, program):
+        """Reviewer minor: unrated sets aren't treated as all-out (RPE 10)."""
+        m = compute_metrics("strength", program, bench_sets(1, 185, 5, None))
+        # 3x5 target RPE 8 -> 5 + 2 RIR -> Epley(185, 7)
+        assert lift(m, "bench_press").best_e1rm == epley_e1rm(185, 7)
+
+    def test_untargeted_muscles_have_no_target(self, program):
+        m = compute_metrics("hypertrophy", program, sets_of("back_squat", 1, 225, 5, 8, day=2))
+        lower_back = next(v for v in m.muscle_volume if v.muscle == "lower_back")
+        quads = next(v for v in m.muscle_volume if v.muscle == "quads")
+        assert lower_back.status == "no_target" and lower_back.target_low is None
+        assert quads.status == "below" and quads.target_low == 10
 
     def test_heavy_and_light_days_are_not_a_regression(self):
         """Reviewer m3: different slots on different days aren't compared."""

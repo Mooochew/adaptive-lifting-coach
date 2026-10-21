@@ -22,6 +22,10 @@ export type ExerciseInfo = Schemas["ExerciseInfo"];
 export type RulesResponse = Schemas["RulesResponse"];
 export type TemplateResponse = Schemas["TemplateResponse"];
 export type DemoAthlete = Schemas["DemoAthlete"];
+export type MetricsRequest = Schemas["MetricsRequest"];
+export type Health = Schemas["Health"];
+export type TemplateRequest = Schemas["TemplateRequest"];
+export type AdvanceResponse = Schemas["AdvanceResponse"];
 
 export type Goal = Profile["goal"];
 export type Units = Profile["units"];
