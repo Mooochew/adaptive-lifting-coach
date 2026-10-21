@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 from app.config import get_settings
 from app.exercises import EXERCISES, ExerciseInfo
-from app.routes import metrics
+from app.routes import metrics, program
 from app.rules import GOALS, SHARED, GoalRules, SharedRules
 
 settings = get_settings()
@@ -23,6 +23,7 @@ app.add_middleware(
 )
 
 app.include_router(metrics.router)
+app.include_router(program.router)
 
 
 class Health(BaseModel):

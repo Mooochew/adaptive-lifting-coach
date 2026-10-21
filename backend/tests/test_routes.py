@@ -73,6 +73,22 @@ class TestSchemaValidation:
             bench_rx(slot_id="Bench Press!")
 
 
+def test_template_endpoint():
+    profile = {"goal": "strength", "experience": "beginner", "days_per_week": 3, "session_minutes": 60,
+               "equipment": ["barbell", "dumbbell"]}
+    res = client.post("/program/template", json=profile)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["notes"] == [] and len(data["program"]["weeks"]) == 5
+
+
+def test_demo_endpoint_feeds_metrics():
+    demo = client.get("/demo").json()
+    res = client.post("/metrics", json={"goal": demo["profile"]["goal"], "program": demo["program"],
+                                        "logs": demo["logs"]})
+    assert res.status_code == 200 and res.json()["lifts"]
+
+
 def test_cors_allows_frontend_origin():
     res = client.options(
         "/metrics",

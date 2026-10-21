@@ -10,6 +10,7 @@ Set types:
   backoff  counts for volume, effort and e1RM, but not progression decisions
 """
 
+import math
 from collections import defaultdict
 from statistics import mean
 
@@ -54,6 +55,8 @@ from app.schemas import (
 
 SlotKey = tuple[int, str]           # (day, slot_id)
 
+TIMED_STEP_SECONDS = 5               # timed holds progress 5 s at a time, not 1
+
 
 # ---------- Basic formulas ----------
 
@@ -81,6 +84,12 @@ def round_to_increment(load: float, units: Units) -> float:
     """Round to the nearest loadable weight (multiples of 5 lb / 2.5 kg)."""
     inc = MIN_LOAD_STEP[units]
     return round(round(load / inc) * inc, 2)
+
+
+def floor_to_increment(load: float, units: Units) -> float:
+    """Round down to a loadable weight (tolerant of float error: 224.9999 -> 225, not 220)."""
+    inc = MIN_LOAD_STEP[units]
+    return math.floor(load / inc + 1e-9) * inc
 
 
 def is_done(log: SetLog) -> bool:
@@ -164,8 +173,8 @@ def suggest_next_step(
     """
     inc = MIN_LOAD_STEP[units]
     working = [s for s in _working(sets, rx) if is_done(s)]
-    load = max((s.weight for s in working), default=rx.load)
-    bodyweight = info.equipment == "bodyweight" and rx.load == 0
+    load = max((s.weight for s in working), default=rx.load or 0.0)
+    bodyweight = info.equipment == "bodyweight" and not rx.load
     avg_rpe = _avg_rpe(working)
     max_rpe = rx.target_rpe + RPE_TOLERANCE
     top = top_of_range(rules, rx.reps, rx.reps_max)
@@ -177,7 +186,7 @@ def suggest_next_step(
         new = min(round_to_increment(load * (1 - REDUCE_FRACTION), units), load - inc)
         return "reduce", f"Missed reps two sessions in a row; drop to {max(new, 0):g} {units}.", max(new, 0.0), rx.reps
 
-    if rx.load > 0 and load < rx.load:
+    if rx.load and load < rx.load:
         return "hold", (
             f"Worked at {load:g} {units}, below the prescribed {rx.load:g}; repeat the prescribed load."
         ), rx.load, rx.reps
@@ -210,6 +219,12 @@ def suggest_next_step(
             f"Avg RPE {avg_rpe:.1f} is over target {rx.target_rpe:g}; repeat {weakest}+ reps at "
             f"{load:g} {units} until it feels like RPE {rx.target_rpe:g}, then add reps."
         ), load, weakest
+
+    if info.timed:
+        target = min(weakest + TIMED_STEP_SECONDS, top)
+        return "add_reps", (
+            f"Aim for {target}s on your shortest hold. Move to a harder variation once every hold reaches {top}s."
+        ), load, target
 
     target = min(weakest + 1, top)
     return "add_reps", (

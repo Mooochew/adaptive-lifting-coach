@@ -92,8 +92,8 @@ def _previous_loads(previous: Week | None) -> tuple[dict, dict]:
     if previous:
         for s in previous.sessions:
             for ex in s.exercises:
-                by_slot[(s.day, ex.slot_id)] = (ex.exercise_id, ex.load)
-                by_exercise[ex.exercise_id] = max(by_exercise.get(ex.exercise_id, 0.0), ex.load)
+                by_slot[(s.day, ex.slot_id)] = (ex.exercise_id, ex.load or 0.0)
+                by_exercise[ex.exercise_id] = max(by_exercise.get(ex.exercise_id, 0.0), ex.load or 0.0)
     return by_slot, by_exercise
 
 
@@ -150,6 +150,13 @@ def guard_week(
                 else prev_exercise.get(ex.exercise_id, last_loads.get(ex.exercise_id, 0.0))
             )
             bodyweight = info.equipment == "bodyweight"
+
+            if ex.load is None:
+                # Unknown working weight is fine for a new lift; with history, keep the known load.
+                if before > 0:
+                    notes.append(f"{where}: load missing; kept {before:g} {units}.")
+                    ex.load = before
+                continue
 
             if ex.load <= 0 and not bodyweight:
                 if before > 0:

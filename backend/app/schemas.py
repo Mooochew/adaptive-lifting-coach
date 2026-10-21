@@ -60,7 +60,11 @@ class PrescribedExercise(BaseModel):
         default=None, ge=1, le=MAX_REPS,
         description="Top of the rep range for double progression (e.g. 3 x 8-12). None = fixed reps.",
     )
-    load: float = Field(ge=0, description="0 for bodyweight exercises")
+    load: float | None = Field(
+        default=None, ge=0,
+        description="0 for bodyweight exercises; None = not known yet, the lifter picks a working "
+                    "weight for the rep range on the first session",
+    )
     target_rpe: float = Field(ge=5, le=10)
     rest_sec: int = Field(default=120, ge=30, le=600)
     notes: str = ""
@@ -220,5 +224,18 @@ class Metrics(BaseModel):
 
 class MetricsRequest(BaseModel):
     goal: Goal
+    program: Program
+    logs: list[SetLog]
+
+
+# ---------- Programs ----------
+
+class TemplateResponse(BaseModel):
+    program: Program
+    notes: list[str] = Field(description="Guard notes/violations; empty for a healthy template")
+
+
+class DemoAthlete(BaseModel):
+    profile: Profile
     program: Program
     logs: list[SetLog]
