@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
@@ -87,6 +90,15 @@ def test_demo_endpoint_feeds_metrics():
     res = client.post("/metrics", json={"goal": demo["profile"]["goal"], "program": demo["program"],
                                         "logs": demo["logs"]})
     assert res.status_code == 200 and res.json()["lifts"]
+
+
+def test_committed_openapi_is_current():
+    """The frontend's types are generated from backend/openapi.json; it must match the code.
+
+    If this fails: python scripts/export_openapi.py, then npm run gen:types in frontend/.
+    """
+    path = Path(__file__).resolve().parent.parent / "openapi.json"
+    assert json.loads(path.read_text(encoding="utf-8")) == app.openapi()
 
 
 def test_cors_allows_frontend_origin():

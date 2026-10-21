@@ -1,0 +1,1493 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Adaptive Lifting Coach API",
+    "description": "Training math and AI coaching for the Adaptive Lifting Coach frontend.",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/metrics": {
+      "post": {
+        "tags": [
+          "metrics"
+        ],
+        "summary": "Metrics",
+        "description": "Compute e1RM, volume, effort, plateaus, next steps and deload signals. No LLM involved.",
+        "operationId": "metrics_metrics_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MetricsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Metrics"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/program/template": {
+      "post": {
+        "tags": [
+          "program"
+        ],
+        "summary": "Program Template",
+        "description": "Rule-based 4-week block + deload for this profile. No LLM; also the AI fallback.",
+        "operationId": "program_template_program_template_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Profile"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/demo": {
+      "get": {
+        "tags": [
+          "program"
+        ],
+        "summary": "Demo",
+        "description": "A demo athlete with a program and 2.5 weeks of logs.",
+        "operationId": "demo_demo_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DemoAthlete"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "meta"
+        ],
+        "summary": "Health",
+        "description": "Liveness check. The frontend also calls this to wake a sleeping free-tier server.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/exercises": {
+      "get": {
+        "tags": [
+          "meta"
+        ],
+        "summary": "Exercises",
+        "description": "The canonical exercise library.",
+        "operationId": "exercises_exercises_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ExerciseInfo"
+                  },
+                  "type": "array",
+                  "title": "Response Exercises Exercises Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/rules": {
+      "get": {
+        "tags": [
+          "meta"
+        ],
+        "summary": "Rules",
+        "description": "Training rules per goal, plus shared thresholds.",
+        "operationId": "rules_rules_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RulesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "DeloadRules": {
+        "properties": {
+          "set_cut": {
+            "type": "number",
+            "title": "Set Cut"
+          },
+          "load_cut": {
+            "type": "number",
+            "title": "Load Cut"
+          },
+          "rir_add": {
+            "type": "number",
+            "title": "Rir Add"
+          }
+        },
+        "type": "object",
+        "required": [
+          "set_cut",
+          "load_cut",
+          "rir_add"
+        ],
+        "title": "DeloadRules"
+      },
+      "DeloadSignal": {
+        "properties": {
+          "recommended": {
+            "type": "boolean",
+            "title": "Recommended"
+          },
+          "scheduled": {
+            "type": "boolean",
+            "title": "Scheduled",
+            "description": "Next week is a scheduled deload"
+          },
+          "next_week": {
+            "type": "integer",
+            "title": "Next Week"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reasons"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recommended",
+          "scheduled",
+          "next_week",
+          "reasons"
+        ],
+        "title": "DeloadSignal"
+      },
+      "DemoAthlete": {
+        "properties": {
+          "profile": {
+            "$ref": "#/components/schemas/Profile"
+          },
+          "program": {
+            "$ref": "#/components/schemas/Program"
+          },
+          "logs": {
+            "items": {
+              "$ref": "#/components/schemas/SetLog"
+            },
+            "type": "array",
+            "title": "Logs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "profile",
+          "program",
+          "logs"
+        ],
+        "title": "DemoAthlete"
+      },
+      "E1rmPoint": {
+        "properties": {
+          "week": {
+            "type": "integer",
+            "title": "Week"
+          },
+          "day": {
+            "type": "integer",
+            "title": "Day"
+          },
+          "e1rm": {
+            "type": "number",
+            "title": "E1Rm"
+          }
+        },
+        "type": "object",
+        "required": [
+          "week",
+          "day",
+          "e1rm"
+        ],
+        "title": "E1rmPoint"
+      },
+      "ExerciseInfo": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "equipment": {
+            "type": "string",
+            "enum": [
+              "barbell",
+              "dumbbell",
+              "machine",
+              "cable",
+              "bodyweight",
+              "kettlebell"
+            ],
+            "title": "Equipment"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "main",
+              "compound",
+              "isolation"
+            ],
+            "title": "Kind"
+          },
+          "primary": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "chest",
+                "front_delts",
+                "side_delts",
+                "rear_delts",
+                "triceps",
+                "biceps",
+                "lats",
+                "upper_back",
+                "lower_back",
+                "quads",
+                "hamstrings",
+                "glutes",
+                "calves",
+                "abs"
+              ]
+            },
+            "type": "array",
+            "title": "Primary"
+          },
+          "secondary": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "chest",
+                "front_delts",
+                "side_delts",
+                "rear_delts",
+                "triceps",
+                "biceps",
+                "lats",
+                "upper_back",
+                "lower_back",
+                "quads",
+                "hamstrings",
+                "glutes",
+                "calves",
+                "abs"
+              ]
+            },
+            "type": "array",
+            "title": "Secondary",
+            "default": []
+          },
+          "timed": {
+            "type": "boolean",
+            "title": "Timed",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "equipment",
+          "kind",
+          "primary"
+        ],
+        "title": "ExerciseInfo"
+      },
+      "ExerciseRules": {
+        "properties": {
+          "style": {
+            "type": "string",
+            "enum": [
+              "strength",
+              "hypertrophy"
+            ],
+            "title": "Style"
+          },
+          "reps": {
+            "$ref": "#/components/schemas/Range"
+          },
+          "reps_limit": {
+            "$ref": "#/components/schemas/Range"
+          },
+          "rir": {
+            "$ref": "#/components/schemas/Range"
+          },
+          "rep_window": {
+            "type": "integer",
+            "title": "Rep Window"
+          },
+          "load_step_pct": {
+            "type": "number",
+            "title": "Load Step Pct"
+          },
+          "plateau_metric": {
+            "type": "string",
+            "enum": [
+              "e1rm",
+              "performance"
+            ],
+            "title": "Plateau Metric"
+          }
+        },
+        "type": "object",
+        "required": [
+          "style",
+          "reps",
+          "reps_limit",
+          "rir",
+          "rep_window",
+          "load_step_pct",
+          "plateau_metric"
+        ],
+        "title": "ExerciseRules"
+      },
+      "Exposure": {
+        "properties": {
+          "week": {
+            "type": "integer",
+            "title": "Week"
+          },
+          "load": {
+            "type": "number",
+            "title": "Load",
+            "description": "Working load (heaviest working set)"
+          },
+          "reps": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Reps",
+            "description": "Reps of each working set at that load, in set order"
+          },
+          "avg_reps": {
+            "type": "number",
+            "title": "Avg Reps"
+          },
+          "pr": {
+            "type": "boolean",
+            "title": "Pr",
+            "description": "No earlier exposure had >= this load AND >= these average reps"
+          },
+          "deload": {
+            "type": "boolean",
+            "title": "Deload"
+          }
+        },
+        "type": "object",
+        "required": [
+          "week",
+          "load",
+          "reps",
+          "avg_reps",
+          "pr",
+          "deload"
+        ],
+        "title": "Exposure",
+        "description": "One slot's working sets in one week."
+      },
+      "GoalRules": {
+        "properties": {
+          "goal": {
+            "type": "string",
+            "enum": [
+              "strength",
+              "hypertrophy",
+              "general"
+            ],
+            "title": "Goal"
+          },
+          "main": {
+            "$ref": "#/components/schemas/ExerciseRules"
+          },
+          "compound": {
+            "$ref": "#/components/schemas/ExerciseRules"
+          },
+          "isolation": {
+            "$ref": "#/components/schemas/ExerciseRules"
+          },
+          "volume": {
+            "$ref": "#/components/schemas/VolumeRules"
+          },
+          "deload": {
+            "$ref": "#/components/schemas/DeloadRules"
+          }
+        },
+        "type": "object",
+        "required": [
+          "goal",
+          "main",
+          "compound",
+          "isolation",
+          "volume",
+          "deload"
+        ],
+        "title": "GoalRules"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "Health": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "demo_mode": {
+            "type": "boolean",
+            "title": "Demo Mode"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "demo_mode"
+        ],
+        "title": "Health"
+      },
+      "LiftEstimate": {
+        "properties": {
+          "exercise_id": {
+            "type": "string",
+            "title": "Exercise Id"
+          },
+          "weight": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Weight"
+          },
+          "reps": {
+            "type": "integer",
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Reps"
+          }
+        },
+        "type": "object",
+        "required": [
+          "exercise_id",
+          "weight",
+          "reps"
+        ],
+        "title": "LiftEstimate",
+        "description": "A recent set the user can do, used to estimate starting loads."
+      },
+      "LiftMetrics": {
+        "properties": {
+          "exercise_id": {
+            "type": "string",
+            "title": "Exercise Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "style": {
+            "type": "string",
+            "enum": [
+              "strength",
+              "hypertrophy"
+            ],
+            "title": "Style"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "main",
+              "compound",
+              "isolation"
+            ],
+            "title": "Kind"
+          },
+          "e1rm_history": {
+            "items": {
+              "$ref": "#/components/schemas/E1rmPoint"
+            },
+            "type": "array",
+            "title": "E1Rm History",
+            "description": "RPE-adjusted e1RM; only sets with reps + RIR <= 10"
+          },
+          "best_e1rm": {
+            "type": "number",
+            "title": "Best E1Rm"
+          },
+          "avg_rpe_gap": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Rpe Gap",
+            "description": "Avg logged RPE minus target. Positive = harder than planned."
+          },
+          "avg_rir": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Rir"
+          },
+          "unrated_sets": {
+            "type": "integer",
+            "title": "Unrated Sets",
+            "description": "Working sets logged without RPE"
+          },
+          "missed_reps": {
+            "type": "integer",
+            "title": "Missed Reps"
+          },
+          "plateau": {
+            "type": "boolean",
+            "title": "Plateau"
+          },
+          "plateau_suggestion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plateau Suggestion"
+          },
+          "regressing": {
+            "type": "boolean",
+            "title": "Regressing"
+          },
+          "slots": {
+            "items": {
+              "$ref": "#/components/schemas/SlotMetrics"
+            },
+            "type": "array",
+            "title": "Slots"
+          }
+        },
+        "type": "object",
+        "required": [
+          "exercise_id",
+          "name",
+          "style",
+          "kind",
+          "e1rm_history",
+          "best_e1rm",
+          "avg_rpe_gap",
+          "avg_rir",
+          "unrated_sets",
+          "missed_reps",
+          "plateau",
+          "plateau_suggestion",
+          "regressing",
+          "slots"
+        ],
+        "title": "LiftMetrics"
+      },
+      "Metrics": {
+        "properties": {
+          "goal": {
+            "type": "string",
+            "enum": [
+              "strength",
+              "hypertrophy",
+              "general"
+            ],
+            "title": "Goal"
+          },
+          "block": {
+            "type": "integer",
+            "title": "Block"
+          },
+          "lifts": {
+            "items": {
+              "$ref": "#/components/schemas/LiftMetrics"
+            },
+            "type": "array",
+            "title": "Lifts"
+          },
+          "weekly_volume": {
+            "items": {
+              "$ref": "#/components/schemas/WeekVolume"
+            },
+            "type": "array",
+            "title": "Weekly Volume"
+          },
+          "muscle_volume": {
+            "items": {
+              "$ref": "#/components/schemas/MuscleVolume"
+            },
+            "type": "array",
+            "title": "Muscle Volume"
+          },
+          "sessions_logged": {
+            "type": "integer",
+            "title": "Sessions Logged"
+          },
+          "sessions_skipped": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sessions Skipped",
+            "description": "Skipped sessions as \"W{week}D{day}\""
+          },
+          "deload": {
+            "$ref": "#/components/schemas/DeloadSignal"
+          }
+        },
+        "type": "object",
+        "required": [
+          "goal",
+          "block",
+          "lifts",
+          "weekly_volume",
+          "muscle_volume",
+          "sessions_logged",
+          "sessions_skipped",
+          "deload"
+        ],
+        "title": "Metrics"
+      },
+      "MetricsRequest": {
+        "properties": {
+          "goal": {
+            "type": "string",
+            "enum": [
+              "strength",
+              "hypertrophy",
+              "general"
+            ],
+            "title": "Goal"
+          },
+          "program": {
+            "$ref": "#/components/schemas/Program"
+          },
+          "logs": {
+            "items": {
+              "$ref": "#/components/schemas/SetLog"
+            },
+            "type": "array",
+            "title": "Logs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "goal",
+          "program",
+          "logs"
+        ],
+        "title": "MetricsRequest"
+      },
+      "MuscleVolume": {
+        "properties": {
+          "week": {
+            "type": "integer",
+            "title": "Week"
+          },
+          "muscle": {
+            "type": "string",
+            "title": "Muscle"
+          },
+          "hard_sets": {
+            "type": "number",
+            "title": "Hard Sets",
+            "description": "Primary muscle = 1 per hard set, secondary = 0.5"
+          },
+          "target_low": {
+            "type": "number",
+            "title": "Target Low"
+          },
+          "target_max": {
+            "type": "number",
+            "title": "Target Max"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "below",
+              "in_range",
+              "above",
+              "deload"
+            ],
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "week",
+          "muscle",
+          "hard_sets",
+          "target_low",
+          "target_max",
+          "status"
+        ],
+        "title": "MuscleVolume"
+      },
+      "PrescribedExercise": {
+        "properties": {
+          "slot_id": {
+            "type": "string",
+            "maxLength": 40,
+            "minLength": 1,
+            "pattern": "^[a-z0-9_-]+$",
+            "title": "Slot Id",
+            "description": "Unique within the session and stable across weeks, e.g. \"squat_top\""
+          },
+          "exercise_id": {
+            "type": "string",
+            "title": "Exercise Id"
+          },
+          "sets": {
+            "type": "integer",
+            "maximum": 10.0,
+            "minimum": 1.0,
+            "title": "Sets"
+          },
+          "reps": {
+            "type": "integer",
+            "maximum": 300.0,
+            "minimum": 1.0,
+            "title": "Reps",
+            "description": "Target reps, or the bottom of the rep range"
+          },
+          "reps_max": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 300.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reps Max",
+            "description": "Top of the rep range for double progression (e.g. 3 x 8-12). None = fixed reps."
+          },
+          "load": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Load",
+            "description": "0 for bodyweight exercises; None = not known yet, the lifter picks a working weight for the rep range on the first session"
+          },
+          "target_rpe": {
+            "type": "number",
+            "maximum": 10.0,
+            "minimum": 5.0,
+            "title": "Target Rpe"
+          },
+          "rest_sec": {
+            "type": "integer",
+            "maximum": 600.0,
+            "minimum": 30.0,
+            "title": "Rest Sec",
+            "default": 120
+          },
+          "notes": {
+            "type": "string",
+            "title": "Notes",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "slot_id",
+          "exercise_id",
+          "sets",
+          "reps",
+          "target_rpe"
+        ],
+        "title": "PrescribedExercise"
+      },
+      "Profile": {
+        "properties": {
+          "goal": {
+            "type": "string",
+            "enum": [
+              "strength",
+              "hypertrophy",
+              "general"
+            ],
+            "title": "Goal"
+          },
+          "experience": {
+            "type": "string",
+            "enum": [
+              "beginner",
+              "intermediate",
+              "advanced"
+            ],
+            "title": "Experience"
+          },
+          "days_per_week": {
+            "type": "integer",
+            "maximum": 6.0,
+            "minimum": 2.0,
+            "title": "Days Per Week"
+          },
+          "session_minutes": {
+            "type": "integer",
+            "maximum": 120.0,
+            "minimum": 20.0,
+            "title": "Session Minutes"
+          },
+          "equipment": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "barbell",
+                "dumbbell",
+                "machine",
+                "cable",
+                "bodyweight",
+                "kettlebell"
+              ]
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Equipment"
+          },
+          "injuries": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "Injuries",
+            "default": ""
+          },
+          "units": {
+            "type": "string",
+            "enum": [
+              "lb",
+              "kg"
+            ],
+            "title": "Units",
+            "default": "lb"
+          },
+          "lift_estimates": {
+            "items": {
+              "$ref": "#/components/schemas/LiftEstimate"
+            },
+            "type": "array",
+            "title": "Lift Estimates",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "goal",
+          "experience",
+          "days_per_week",
+          "session_minutes",
+          "equipment"
+        ],
+        "title": "Profile"
+      },
+      "Program": {
+        "properties": {
+          "block": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Block",
+            "description": "Training block number; logs carry the same number",
+            "default": 1
+          },
+          "units": {
+            "type": "string",
+            "enum": [
+              "lb",
+              "kg"
+            ],
+            "title": "Units",
+            "default": "lb"
+          },
+          "weeks": {
+            "items": {
+              "$ref": "#/components/schemas/Week"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Weeks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "weeks"
+        ],
+        "title": "Program"
+      },
+      "Range": {
+        "properties": {
+          "low": {
+            "type": "number",
+            "title": "Low"
+          },
+          "high": {
+            "type": "number",
+            "title": "High"
+          }
+        },
+        "type": "object",
+        "required": [
+          "low",
+          "high"
+        ],
+        "title": "Range"
+      },
+      "RulesResponse": {
+        "properties": {
+          "goals": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/GoalRules"
+            },
+            "type": "object",
+            "title": "Goals"
+          },
+          "shared": {
+            "$ref": "#/components/schemas/SharedRules"
+          }
+        },
+        "type": "object",
+        "required": [
+          "goals",
+          "shared"
+        ],
+        "title": "RulesResponse"
+      },
+      "Session": {
+        "properties": {
+          "day": {
+            "type": "integer",
+            "maximum": 7.0,
+            "minimum": 1.0,
+            "title": "Day",
+            "description": "Training day number within the week"
+          },
+          "focus": {
+            "type": "string",
+            "title": "Focus"
+          },
+          "exercises": {
+            "items": {
+              "$ref": "#/components/schemas/PrescribedExercise"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Exercises"
+          }
+        },
+        "type": "object",
+        "required": [
+          "day",
+          "focus",
+          "exercises"
+        ],
+        "title": "Session"
+      },
+      "SetLog": {
+        "properties": {
+          "block": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Block",
+            "default": 1
+          },
+          "week": {
+            "type": "integer",
+            "maximum": 16.0,
+            "minimum": 1.0,
+            "title": "Week"
+          },
+          "day": {
+            "type": "integer",
+            "maximum": 7.0,
+            "minimum": 1.0,
+            "title": "Day"
+          },
+          "slot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slot Id",
+            "description": "Prescribed slot; None for unplanned sets"
+          },
+          "exercise_id": {
+            "type": "string",
+            "title": "Exercise Id"
+          },
+          "set_type": {
+            "type": "string",
+            "enum": [
+              "warmup",
+              "working",
+              "backoff"
+            ],
+            "title": "Set Type",
+            "default": "working"
+          },
+          "set_number": {
+            "type": "integer",
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Set Number"
+          },
+          "weight": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Weight"
+          },
+          "reps": {
+            "type": "integer",
+            "maximum": 300.0,
+            "minimum": 0.0,
+            "title": "Reps"
+          },
+          "rpe": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 10.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rpe"
+          },
+          "completed": {
+            "type": "boolean",
+            "title": "Completed",
+            "default": true
+          },
+          "note": {
+            "type": "string",
+            "title": "Note",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "week",
+          "day",
+          "exercise_id",
+          "set_number",
+          "weight",
+          "reps"
+        ],
+        "title": "SetLog"
+      },
+      "SharedRules": {
+        "properties": {
+          "min_load_step": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Min Load Step"
+          },
+          "hard_set_max_rir": {
+            "type": "number",
+            "title": "Hard Set Max Rir"
+          },
+          "e1rm_max_reps": {
+            "type": "integer",
+            "title": "E1Rm Max Reps"
+          },
+          "plateau_window": {
+            "type": "integer",
+            "title": "Plateau Window"
+          },
+          "e1rm_plateau_threshold": {
+            "type": "number",
+            "title": "E1Rm Plateau Threshold"
+          },
+          "rpe_tolerance": {
+            "type": "number",
+            "title": "Rpe Tolerance"
+          },
+          "reduce_fraction": {
+            "type": "number",
+            "title": "Reduce Fraction"
+          },
+          "deload_every_weeks": {
+            "type": "integer",
+            "title": "Deload Every Weeks"
+          },
+          "max_weekly_increase": {
+            "type": "number",
+            "title": "Max Weekly Increase"
+          },
+          "max_weekly_decrease": {
+            "type": "number",
+            "title": "Max Weekly Decrease"
+          }
+        },
+        "type": "object",
+        "required": [
+          "min_load_step",
+          "hard_set_max_rir",
+          "e1rm_max_reps",
+          "plateau_window",
+          "e1rm_plateau_threshold",
+          "rpe_tolerance",
+          "reduce_fraction",
+          "deload_every_weeks",
+          "max_weekly_increase",
+          "max_weekly_decrease"
+        ],
+        "title": "SharedRules"
+      },
+      "SlotMetrics": {
+        "properties": {
+          "slot_id": {
+            "type": "string",
+            "title": "Slot Id"
+          },
+          "day": {
+            "type": "integer",
+            "title": "Day"
+          },
+          "exposures": {
+            "items": {
+              "$ref": "#/components/schemas/Exposure"
+            },
+            "type": "array",
+            "title": "Exposures"
+          },
+          "plateau": {
+            "type": "boolean",
+            "title": "Plateau",
+            "description": "No rep or load PR in recent exposures (hypertrophy-style lifts; strength main lifts use e1RM at the lift level)"
+          },
+          "regressing": {
+            "type": "boolean",
+            "title": "Regressing",
+            "description": "Performance dropped two exposures in a row"
+          },
+          "next_step": {
+            "type": "string",
+            "enum": [
+              "add_load",
+              "add_reps",
+              "hold",
+              "reduce"
+            ],
+            "title": "Next Step"
+          },
+          "next_step_reason": {
+            "type": "string",
+            "title": "Next Step Reason"
+          },
+          "suggested_load": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggested Load"
+          },
+          "suggested_reps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggested Reps"
+          }
+        },
+        "type": "object",
+        "required": [
+          "slot_id",
+          "day",
+          "exposures",
+          "plateau",
+          "regressing",
+          "next_step",
+          "next_step_reason",
+          "suggested_load",
+          "suggested_reps"
+        ],
+        "title": "SlotMetrics"
+      },
+      "TemplateResponse": {
+        "properties": {
+          "program": {
+            "$ref": "#/components/schemas/Program"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Notes",
+            "description": "Guard notes/violations; empty for a healthy template"
+          }
+        },
+        "type": "object",
+        "required": [
+          "program",
+          "notes"
+        ],
+        "title": "TemplateResponse"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "VolumeRules": {
+        "properties": {
+          "start": {
+            "$ref": "#/components/schemas/Range"
+          },
+          "max": {
+            "type": "number",
+            "title": "Max"
+          },
+          "ramp": {
+            "$ref": "#/components/schemas/Range"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start",
+          "max",
+          "ramp"
+        ],
+        "title": "VolumeRules"
+      },
+      "Week": {
+        "properties": {
+          "week": {
+            "type": "integer",
+            "maximum": 16.0,
+            "minimum": 1.0,
+            "title": "Week"
+          },
+          "is_deload": {
+            "type": "boolean",
+            "title": "Is Deload",
+            "default": false
+          },
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/Session"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Sessions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "week",
+          "sessions"
+        ],
+        "title": "Week"
+      },
+      "WeekVolume": {
+        "properties": {
+          "week": {
+            "type": "integer",
+            "title": "Week"
+          },
+          "is_deload": {
+            "type": "boolean",
+            "title": "Is Deload"
+          },
+          "tonnage": {
+            "type": "number",
+            "title": "Tonnage",
+            "description": "Sum of weight x reps for completed non-warm-up sets"
+          },
+          "hard_sets": {
+            "type": "integer",
+            "title": "Hard Sets",
+            "description": "Completed non-warm-up sets at 4 RIR or closer (unrated sets count)"
+          },
+          "unrated_sets": {
+            "type": "integer",
+            "title": "Unrated Sets"
+          },
+          "avg_rpe_gap": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Rpe Gap"
+          }
+        },
+        "type": "object",
+        "required": [
+          "week",
+          "is_deload",
+          "tonnage",
+          "hard_sets",
+          "unrated_sets",
+          "avg_rpe_gap"
+        ],
+        "title": "WeekVolume"
+      }
+    }
+  }
+}

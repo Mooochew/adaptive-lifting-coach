@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
 
     # Comma-separated list of origins allowed to call the API (the Next.js app).
-    frontend_origin: str = "http://localhost:3000"
+    frontend_origin: str = "http://localhost:3000,http://127.0.0.1:3000"
 
     # LLM settings (used from Phase 3 on).
     llm_provider: str = ""

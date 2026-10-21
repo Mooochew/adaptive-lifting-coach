@@ -1,0 +1,90 @@
+@import "tailwindcss";
+
+/*
+ * Rubber & Steel design tokens.
+ * One theme on purpose: charcoal "gym floor", warm chalk text, safety orange.
+ * Usage in Tailwind: bg-rubber, text-chalk, text-muted, border-steel, bg-orange, font-display ...
+ */
+@theme {
+  --color-rubber: #2b2b2b;         /* page background */
+  --color-rubber-deep: #232323;    /* panels, bars */
+  --color-rubber-inset: #262626;   /* inputs, wells */
+  --color-tile: #333333;           /* raised surfaces */
+  --color-tile-hover: #383838;
+  --color-tile-done: #2e2e2e;
+  --color-line: #444444;           /* borders / dividers */
+  --color-line-soft: #3e3e3e;
+  --color-steel: #8b9096;          /* secondary borders, inactive marks */
+  --color-steel-text: #9aa0a6;     /* steel used as text (passes 4.5:1 on rubber) */
+  --color-chalk: #edeae4;          /* primary text */
+  --color-chalk-dim: #c9c4ba;
+  --color-muted: #aba69c;          /* secondary text */
+  --color-faint: #7d7870;          /* placeholders, tertiary */
+  --color-orange: #ff6a13;         /* the one accent */
+  --color-orange-hover: #ff8a45;
+  --color-ink: #1c1c1c;            /* text on orange / chalk */
+  --color-shadow: #1a1a1a;         /* hard offset shadows */
+
+  --font-display: var(--font-display-face), Impact, sans-serif;
+  --font-sans: var(--font-sans-face), system-ui, sans-serif;
+
+  --ease-snap: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  --animate-zoom-in: zoom-in 0.32s var(--ease-snap);
+  --animate-board-in: board-in 0.32s var(--ease-snap);
+  --animate-stamp: stamp 0.28s var(--ease-snap);
+
+  @keyframes zoom-in {
+    from { opacity: 0; transform: scale(0.94); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes board-in {
+    from { opacity: 0; transform: scale(1.04); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes stamp {
+    from { transform: scale(1.35); }
+    to { transform: scale(1); }
+  }
+}
+
+@layer base {
+  body {
+    color: var(--color-chalk);
+    font-family: var(--font-sans);
+    font-size: 15px;
+  }
+  button { cursor: pointer; }
+}
+
+@layer utilities {
+  /* Rubber gym-floor flecks: a texture, not a gradient wash. */
+  .rubber {
+    background-color: var(--color-rubber);
+    background-image:
+      radial-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1.3px),
+      radial-gradient(rgba(0, 0, 0, 0.22) 1px, transparent 1.3px);
+    background-size: 7px 7px, 11px 11px;
+    background-position: 0 0, 3px 5px;
+  }
+  /* Hazard stripes: deload markers. */
+  .hazard {
+    background: repeating-linear-gradient(135deg, var(--color-orange) 0 8px, var(--color-ink) 8px 16px);
+  }
+  .hazard-soft {
+    background: repeating-linear-gradient(135deg, #2f2f2f 0 12px, #2a2a2a 12px 24px);
+  }
+  .display {
+    font-family: var(--font-display);
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+  .tabular { font-variant-numeric: tabular-nums; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
