@@ -26,6 +26,16 @@ export type MetricsRequest = Schemas["MetricsRequest"];
 export type Health = Schemas["Health"];
 export type TemplateRequest = Schemas["TemplateRequest"];
 export type AdvanceResponse = Schemas["AdvanceResponse"];
+export type ReviewResponse = Schemas["ReviewResponse"];
+export type AppliedEdit = Schemas["AppliedEdit"];
+
+/** The AI coach's review of a program, kept with it (null for the demo or older data). */
+export interface CoachReview {
+  source: ReviewResponse["source"];
+  summary: string;
+  edits: AppliedEdit[];
+  fallbackReason: string | null;
+}
 
 export type Goal = Profile["goal"];
 export type Units = Profile["units"];

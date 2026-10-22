@@ -16,6 +16,7 @@ import type {
   Metrics,
   MetricsRequest,
   Profile,
+  ReviewResponse,
   RulesResponse,
   TemplateResponse,
 } from "./types";
@@ -37,6 +38,8 @@ export class ApiError extends Error {
 const DEFAULT_TIMEOUT_MS = 15_000;
 // A sleeping free-tier server can take ~30 s to wake; /health is how we wake it.
 const HEALTH_TIMEOUT_MS = 30_000;
+// The AI coach may think and retry (up to 3 model calls) before answering.
+const REVIEW_TIMEOUT_MS = 180_000;
 
 type FetchLike = typeof fetch;
 
@@ -46,6 +49,8 @@ export interface ApiClient {
   exercises(): Promise<ExerciseInfo[]>;
   demo(): Promise<DemoAthlete>;
   template(profile: Profile, block?: number): Promise<TemplateResponse>;
+  /** The standard plan reviewed by the AI coach (falls back to the standard plan server-side). */
+  review(profile: Profile, block?: number): Promise<ReviewResponse>;
   advance(req: MetricsRequest, signal?: AbortSignal): Promise<AdvanceResponse>;
   metrics(req: MetricsRequest, signal?: AbortSignal): Promise<Metrics>;
 }
@@ -117,7 +122,7 @@ export function createApi(baseUrl: string = API_URL, fetchImpl: FetchLike = fetc
   }
 
   // Only requests with a body declare JSON; plain GETs stay "simple" (no CORS preflight).
-  const post = <T>(path: string, data: unknown, opts?: { signal?: AbortSignal }) =>
+  const post = <T>(path: string, data: unknown, opts?: { signal?: AbortSignal; timeoutMs?: number }) =>
     request<T>(path, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -130,6 +135,8 @@ export function createApi(baseUrl: string = API_URL, fetchImpl: FetchLike = fetc
     exercises: () => request<ExerciseInfo[]>("/exercises"),
     demo: () => request<DemoAthlete>("/demo"),
     template: (profile, block = 1) => post<TemplateResponse>("/program/template", { profile, block }),
+    review: (profile, block = 1) =>
+      post<ReviewResponse>("/program/review", { profile, block }, { timeoutMs: REVIEW_TIMEOUT_MS }),
     advance: (req, signal) => post<AdvanceResponse>("/program/advance", req, { signal }),
     metrics: (req, signal) => post<Metrics>("/metrics", req, { signal }),
   };

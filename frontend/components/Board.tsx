@@ -4,6 +4,7 @@ import { useApp } from "@/lib/store";
 import type { Program, Week } from "@/lib/types";
 import { exerciseName, isTimed, loadLabel, prSessions, repRange } from "@/lib/view";
 import { currentPosition, sessionProgress, sessionStatus } from "@/lib/workout";
+import CoachCard from "./CoachCard";
 import E1rmStrip from "./E1rmStrip";
 
 /** The block as a whiteboard: weeks are columns, sessions are tiles. */
@@ -30,6 +31,8 @@ export default function Board() {
           <span className="inline-flex items-center gap-1.5"><span className="inline-block size-3.5 border-2 border-orange" />This week</span>
         </div>
       </div>
+
+      <CoachCard />
 
       <div className="overflow-x-auto pb-2">
         <div className="grid min-w-[900px] gap-3" style={{ gridTemplateColumns: `repeat(${weeks.length}, minmax(0, 1fr))` }}>

@@ -31,7 +31,8 @@ export default defineConfig({
       command: `"${python}" -m uvicorn app.main:app --port ${new URL(API_URL).port}`,
       cwd: backendDir,
       url: `${API_URL}/health`,
-      env: { FRONTEND_ORIGIN: FRONTEND_URL },
+      // fake = scripted AI coach: e2e runs need no API key and cost nothing
+      env: { FRONTEND_ORIGIN: FRONTEND_URL, LLM_PROVIDER: "fake" },
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
     },

@@ -34,7 +34,13 @@ test("onboarding: a new lifter gets a program", async ({ page }) => {
   await page.getByLabel("Days per week").selectOption("3");
   await page.getByLabel("Bench press weight in lb").fill("185");
   await page.getByLabel("Bench press reps").fill("5");
+  await page.getByLabel(/Training background/).fill("3 years lifting, recover well");
   await page.getByRole("button", { name: "Build my program" }).click();
+
+  // The (scripted, e2e) AI coach reviewed the standard plan and its review is shown, labelled.
+  const coach = page.getByRole("region", { name: "Your coach's adjustments" });
+  await expect(coach).toContainText("This plan already fits you well");
+  await expect(coach).toContainText("AI-written");
 
   const weekOne = page.getByRole("button", { name: /^Week 1 .*Open session\.$/ });
   await expect(page.getByRole("heading", { name: "The Board" })).toBeVisible();

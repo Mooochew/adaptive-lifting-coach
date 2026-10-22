@@ -49,6 +49,7 @@ export default function Onboarding({ onDone, onCancel }: Props) {
     existing?.equipment.filter((e) => e !== "bodyweight") ?? EQUIPMENT.map((e) => e.value),   // default: full gym
   );
   const [injuries, setInjuries] = useState(existing?.injuries ?? "");
+  const [background, setBackground] = useState(existing?.training_background ?? "");   // missing in older data
   const [lifts, setLifts] = useState<Record<string, { weight: string; reps: string }>>(() =>
     Object.fromEntries(MAIN_LIFTS.map((l) => {
       const e = existing?.lift_estimates.find((x) => x.exercise_id === l.id);
@@ -71,7 +72,7 @@ export default function Onboarding({ onDone, onCancel }: Props) {
       session_minutes: minutes,
       equipment: [...equipment, "bodyweight"],
       injuries: injuries.trim(),
-      training_background: existing?.training_background ?? "",   // older saved profiles don't have it
+      training_background: background.trim(),
       units,
       lift_estimates: MAIN_LIFTS.flatMap((l) => {
         const w = Number(lifts[l.id].weight);
@@ -162,9 +163,20 @@ export default function Onboarding({ onDone, onCancel }: Props) {
           onChange={(e) => setInjuries(e.target.value)} placeholder="e.g. left shoulder gets cranky on overhead pressing" />
       </label>
 
+      <label className="flex flex-col gap-2">
+        <span className={label}>Training background (optional)</span>
+        <span className="text-sm text-muted">
+          Your AI coach reads this when adjusting the plan: how long you&apos;ve trained, what has or hasn&apos;t
+          worked, how you recover.
+        </span>
+        <textarea className={`${field} min-h-20 font-normal`} maxLength={500} value={background}
+          onChange={(e) => setBackground(e.target.value)}
+          placeholder="e.g. 6 years lifting; high volume leaves me beat up, I grow better on fewer, harder sets" />
+      </label>
+
       <div className="flex flex-wrap items-center gap-3">
         <button type="submit" className={btnPrimary} disabled={busy !== null || equipment.length === 0}>
-          {busy === "template" ? "Building…" : "Build my program"}
+          {busy === "template" ? "Your coach is reviewing your program…" : "Build my program"}
         </button>
         {onCancel && <button type="button" className={btn()} onClick={onCancel}>Cancel</button>}
         {equipment.length === 0 && (

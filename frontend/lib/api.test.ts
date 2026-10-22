@@ -23,6 +23,21 @@ describe("api client", () => {
     expect(body.profile.goal).toBe("general");
   });
 
+  it("asks the AI coach for a reviewed program, allowing it time to think", async () => {
+    vi.useFakeTimers();
+    const body = { program: { weeks: [] }, notes: [], volume_shortfalls: [], source: "ai", summary: "Hi",
+                   edits: [], fallback_reason: null };
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => setTimeout(() => resolve(
+      new Response(JSON.stringify(body), { status: 200 })), 40_000)));
+    const pending = createApi("http://api.test", asFetch(fetchMock)).review(profile, 3);
+    await vi.advanceTimersByTimeAsync(40_000);
+    const res = await pending;
+    expect(res.summary).toBe("Hi");
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("http://api.test/program/review");
+    expect(JSON.parse(init.body as string)).toMatchObject({ block: 3, profile: { goal: "general" } });
+  });
+
   it("GET requests don't send a Content-Type (no CORS preflight)", async () => {
     const fetchMock = vi.fn(() => json(200, { ok: true, demo_mode: false }));
     await createApi("http://api.test", asFetch(fetchMock)).health();
