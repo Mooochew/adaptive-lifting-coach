@@ -114,17 +114,22 @@ def review_program(review: ProgramReview, profile: Profile, block: int = 1) -> R
     applied: list[AppliedEdit] = []
     overrides: dict[str, float] = {}
     edited_shortfalls = shortfalls
+    excluded: dict[int, set[str]] = {}
     if not problems:
-        applied, overrides, problems, edited_shortfalls = _apply(review, first, profile)
+        applied, overrides, problems, edited_shortfalls, excluded = _apply(review, first, profile)
     if not problems:
-        problems = _check_week_one(first, baseline_first, profile)
+        problems = _check_week_one(first, baseline_first, profile, _injury_muscles(review, baseline_first))
 
     if problems:
         program, notes, _ = expand_block(baseline_first, profile, block)
         return ReviewOutcome(program=program, summary=review.summary, applied=[], notes=notes,
                              violations=problems, shortfalls=shortfalls)
 
-    program, notes, violations = expand_block(first, profile, block, start_overrides=overrides)
+    program, notes, violations = expand_block(first, profile, block, start_overrides=overrides, excluded=excluded)
+    # What the lifter is told was taken out must stay out, in every week.
+    violations += [f"Week {w.week} Day {s.day} still has {e.exercise_id} after it was taken out."
+                   for w in program.weeks for s in w.sessions for e in s.exercises
+                   if e.exercise_id in excluded.get(s.day, set())]
     if not violations:
         # Edits mutate models in place, which skips their validators: re-check the whole program
         # so the lifter can never receive one the API itself would reject (e.g. an empty session).
@@ -265,13 +270,15 @@ def _validate(review: ProgramReview, first: Week, profile: Profile) -> list[str]
 
 
 def _apply(review: ProgramReview, first: Week, profile: Profile
-           ) -> tuple[list[AppliedEdit], dict[str, float], list[str], list[str]]:
+           ) -> tuple[list[AppliedEdit], dict[str, float], list[str], list[str], dict[int, set[str]]]:
     """Apply validated edits to week 1 in place.
 
-    Returns (applied, volume overrides, problems, shortfalls of the edited week 1)."""
+    Returns (applied, volume overrides, problems, shortfalls of the edited week 1, and the
+    exercises taken out of each day by swaps and removals, which must not come back)."""
     applied: list[AppliedEdit] = []
     frozen: set[tuple[int, str]] = set()
     overrides: dict[str, float] = {}
+    excluded: dict[int, set[str]] = {}
     baseline_sets = weekly_muscle_sets(first)
 
     for e in review.edits:
@@ -283,6 +290,8 @@ def _apply(review: ProgramReview, first: Week, profile: Profile
             index, ex = next((i, x) for i, x in enumerate(session.exercises) if x.slot_id == e.slot_id)
             change, slot_id = _apply_to_slot(e, session, index, ex, profile)
             frozen.add((session.day, slot_id))
+            if e.kind in ("swap", "remove"):
+                excluded.setdefault(session.day, set()).add(ex.exercise_id)
         applied.append(AppliedEdit(kind=e.kind, day=e.day if e.kind != "volume" else None,
                                    slot_id=e.slot_id if e.kind != "volume" else None,
                                    muscle=str(e.muscle) if e.kind == "volume" else None,
@@ -294,11 +303,13 @@ def _apply(review: ProgramReview, first: Week, profile: Profile
     volume = goal_rules(profile.goal).volume
     problems: list[str] = []
     stuck: dict[str, float] = {}
-    shortfalls = fill_volume(first, profile, volume.start.low, overrides=overrides, frozen=frozen)
+    shortfalls = fill_volume(first, profile, volume.start.low, overrides=overrides, frozen=frozen,
+                                 excluded=excluded)
     for _ in range(4):
         stuck = {m: t for m, t in overrides.items()
                  if weekly_muscle_sets(first).get(m, 0.0) > t and not reduce_volume(first, m, t, frozen)}
-        shortfalls = fill_volume(first, profile, volume.start.low, overrides=overrides, frozen=frozen)
+        shortfalls = fill_volume(first, profile, volume.start.low, overrides=overrides, frozen=frozen,
+                                 excluded=excluded)
         if all(weekly_muscle_sets(first).get(m, 0.0) <= t for m, t in overrides.items()):
             break
     after = weekly_muscle_sets(first)
@@ -313,7 +324,7 @@ def _apply(review: ProgramReview, first: Week, profile: Profile
         if a.kind == "volume":
             a.change = (f"{a.muscle}: {baseline_sets.get(a.muscle, 0.0):g} → {after.get(a.muscle, 0.0):g} "
                         "weekly sets in week 1")
-    return applied, overrides, problems, shortfalls
+    return applied, overrides, problems, shortfalls, excluded
 
 
 def _apply_to_slot(e: ProposedEdit, session: Session, index: int, ex, profile: Profile) -> tuple[str, str]:
@@ -342,7 +353,16 @@ def _apply_to_slot(e: ProposedEdit, session: Session, index: int, ex, profile: P
     return f"Removed {info.name}", ex.slot_id
 
 
-def _check_week_one(first: Week, baseline: Week, profile: Profile) -> list[str]:
+def _injury_muscles(review: ProgramReview, baseline: Week) -> set[str]:
+    """Primary muscles of the exercises that injury edits changed: these may drop below the band
+    (less shoulder work for a sore shoulder is the point), never above it."""
+    slots = {(s.day, e.slot_id): e.exercise_id for s in baseline.sessions for e in s.exercises}
+    return {m for e in review.edits if e.for_injury and (e.day, e.slot_id) in slots
+            for m in get_exercise(slots[(e.day, e.slot_id)]).primary}
+
+
+def _check_week_one(first: Week, baseline: Week, profile: Profile,
+                    injury_muscles: set[str] = frozenset()) -> list[str]:
     """Edited week 1 still fits each session's time and keeps changed muscles within the band."""
     problems: list[str] = []
     for session, before in zip(first.sessions, baseline.sessions):
@@ -353,10 +373,10 @@ def _check_week_one(first: Week, baseline: Week, profile: Profile) -> list[str]:
                             f"{profile.session_minutes}-minute limit; remove sets or keep it shorter.")
     band = goal_rules(profile.goal).volume.start_band
     now, then = weekly_muscle_sets(first), weekly_muscle_sets(baseline)
-    outside = lambda v: max(band.low - v, v - band.high, 0.0)
+    outside = lambda v, m: max(0.0 if m in injury_muscles else band.low - v, v - band.high, 0.0)
     for muscle in VOLUME_TARGET_MUSCLES:
         new, old = now.get(muscle, 0.0), then.get(muscle, 0.0)
-        if new != old and outside(new) > outside(old):
+        if new != old and outside(new, muscle) > outside(old, muscle):
             problems.append(f"{muscle}: {new:g} weekly sets in week 1 is outside the {profile.goal} band "
                             f"{band.low:g}-{band.high:g}.")
     return problems

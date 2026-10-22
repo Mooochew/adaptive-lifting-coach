@@ -222,12 +222,14 @@ def _within_caps(week: Week, session: Session, change: dict[str, float], volume_
 
 
 def _add_set_for(muscle: str, week: Week, profile: Profile, previous: dict[str, float] | None,
-                 frozen: set[tuple[int, str]] = frozenset()) -> bool:
+                 frozen: set[tuple[int, str]] = frozenset(), excluded: dict[int, set[str]] | None = None) -> bool:
     """Add one set to an exercise training `muscle` directly, or add a fitting accessory.
 
     Spreads volume: prefers the session where this muscle has done the least so far.
-    Slots in `frozen` ((day, slot_id), e.g. ones a coach just edited) are left as they are.
+    Slots in `frozen` ((day, slot_id), e.g. ones a coach just edited) are left as they are, and an
+    accessory is never added to a day whose `excluded` exercises (day -> ids a coach took out) include it.
     """
+    excluded = excluded or {}
     volume = goal_rules(profile.goal).volume
     muscle_load = lambda s: session_muscle_sets(s).get(muscle, 0.0)
 
@@ -257,7 +259,8 @@ def _add_set_for(muscle: str, week: Week, profile: Profile, previous: dict[str, 
         if info.equipment not in available:
             continue
         for session in by_free_time:
-            if any(ex.exercise_id == exercise_id or ex.slot_id == f"x_{exercise_id}" for ex in session.exercises):
+            if (exercise_id in excluded.get(session.day, ())
+                    or any(ex.exercise_id == exercise_id or ex.slot_id == f"x_{exercise_id}" for ex in session.exercises)):
                 continue
             new = make_prescription(f"x_{exercise_id}", info, profile, EXTRA_EXERCISE_SETS)
             minutes = new.sets * (new.rest_sec + WORK_SECONDS_PER_SET) / 60
@@ -271,7 +274,8 @@ def _add_set_for(muscle: str, week: Week, profile: Profile, previous: dict[str, 
 
 def fill_volume(week: Week, profile: Profile, target: float, previous: Week | None = None,
                 overrides: dict[str, float] | None = None,
-                frozen: set[tuple[int, str]] = frozenset()) -> list[str]:
+                frozen: set[tuple[int, str]] = frozenset(),
+                excluded: dict[int, set[str]] | None = None) -> list[str]:
     """Raise every targeted muscle to `target` weekly sets (or its own target in `overrides`)
     where the schedule allows, without touching `frozen` slots.
 
@@ -287,7 +291,7 @@ def fill_volume(week: Week, profile: Profile, target: float, previous: Week | No
         if not short:
             break
         muscle = max(short, key=lambda m: target_of(m) - current.get(m, 0.0))
-        if not _add_set_for(muscle, week, profile, previous_sets, frozen):
+        if not _add_set_for(muscle, week, profile, previous_sets, frozen, excluded):
             stuck.add(muscle)
     current = weekly_muscle_sets(week)
     return [f"{m}: {current.get(m, 0.0):g} of {target_of(m):g} weekly sets (not enough time or equipment)"
@@ -364,12 +368,14 @@ def build_week_one(profile: Profile) -> tuple[Week, list[str]]:
 
 
 def expand_block(first: Week, profile: Profile, block: int = 1,
-                 start_overrides: dict[str, float] | None = None) -> tuple[Program, list[str], list[str]]:
+                 start_overrides: dict[str, float] | None = None,
+                 excluded: dict[int, set[str]] | None = None) -> tuple[Program, list[str], list[str]]:
     """Weeks 2-4 ramp from `first` by the goal's minimum ramp, then a deload built from `first`;
     everything goes through the guards. Returns (program, guard notes, guard violations).
 
     `start_overrides` (muscle -> week-1 weekly sets) moves a muscle's starting point, e.g. a
-    coach's volume adjustment; that muscle then ramps from there like the others.
+    coach's volume adjustment; that muscle then ramps from there like the others. `excluded`
+    (day -> exercise ids) keeps exercises a coach took out of a day from being added back.
     """
     volume = goal_rules(profile.goal).volume
     weeks = [first]
@@ -378,7 +384,7 @@ def expand_block(first: Week, profile: Profile, block: int = 1,
         ramp = volume.ramp.low * (n - 1)
         target = min(volume.start.low + ramp, volume.max)
         overrides = {m: min(sets + ramp, volume.max) for m, sets in (start_overrides or {}).items()}
-        fill_volume(week, profile, target, previous=weeks[-1], overrides=overrides)
+        fill_volume(week, profile, target, previous=weeks[-1], overrides=overrides, excluded=excluded)
         weeks.append(week)
     weeks.append(deload_week(first, profile))
 

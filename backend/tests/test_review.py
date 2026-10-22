@@ -338,3 +338,42 @@ class TestVolumeSideEffects:
         quads = [weekly_muscle_sets(w)["quads"] for w in outcome.program.weeks[:4]]
         assert all(0 <= b - a <= 2 for a, b in zip(quads, quads[1:]))        # within the ramp
         assert quads[3] >= 8 + 3 * 1 - 0.5                                     # +1 a week (hypertrophy)
+
+
+class TestInjuryChangesStick:
+    """Security review: the volume top-up re-added the very exercise an injury edit took out."""
+
+    def days_with(self, outcome, day, exercise_id):
+        return [w.week for w in outcome.program.weeks
+                for s in w.sessions if s.day == day for e in s.exercises if e.exercise_id == exercise_id]
+
+    def test_removed_exercise_is_not_added_back_in_any_week(self):
+        p = lifter(session_minutes=45, injuries=SHOULDER)
+        outcome = review_program(review(edit("remove", day=1, slot_id="lateral", for_injury=True)), p)
+        assert outcome.violations == [] and outcome.applied[0].change == "Removed Dumbbell Lateral Raise"
+        assert self.days_with(outcome, 1, "lateral_raise") == []
+
+    def test_swapped_away_exercise_is_not_added_back(self):
+        p = lifter(days_per_week=2, equipment=["dumbbell", "kettlebell"])
+        outcome = review_program(review(edit("swap", day=1, slot_id="x_dip", new_exercise_id="push_up")), p)
+        assert outcome.violations == [] and self.days_with(outcome, 1, "dip") == []
+
+    def test_every_injury_removal_sticks_across_profiles(self):
+        """The reviewer's sweep: no removed exercise reappears in its session in any week."""
+        for days in (3, 4, 5):
+            for minutes in (45, 60, 90):
+                p = lifter(days_per_week=days, session_minutes=minutes, injuries=SHOULDER)
+                for session in build_template(p)[0].weeks[0].sessions:
+                    for ex in session.exercises:
+                        outcome = review_program(review(edit("remove", day=session.day, slot_id=ex.slot_id,
+                                                             for_injury=True)), p)
+                        if not outcome.violations:
+                            assert self.days_with(outcome, session.day, ex.exercise_id) == [], \
+                                (days, minutes, session.day, ex.slot_id)
+
+    def test_injury_may_lower_its_own_muscles_below_the_band_but_nothing_else(self):
+        p = lifter(session_minutes=45, injuries=SHOULDER)
+        ok = review_program(review(edit("remove", day=1, slot_id="lateral", for_injury=True)), p)
+        assert ok.violations == [] and weekly_muscle_sets(ok.program.weeks[0])["side_delts"] < 6
+        # the same removal without an injury claim isn't allowed at all
+        assert "injur" in problems(review_program(review(edit("remove", day=1, slot_id="lateral")), lifter()))
