@@ -106,7 +106,7 @@ class TestFakeLLM:
         assert fake.generate(system="s", user="u", schema=Answer).text == "first"
         with pytest.raises(ValueError):
             fake.generate(system="s", user="u", schema=Answer)
-        assert fake.calls[1] == {"system": "s", "user": "u"} and fake.usage.calls == 2
+        assert fake.calls[1] == {"system": "s", "user": "u", "timeout_s": None} and fake.usage.calls == 2
 
     def test_malformed_dict_raises_like_a_bad_reply(self):
         with pytest.raises(ValidationError):
@@ -130,3 +130,25 @@ class TestBuildLLM:
     def test_key_is_secret(self):
         settings = Settings(_env_file=None, openai_api_key="sk-very-secret")
         assert "sk-very-secret" not in repr(settings) and "sk-very-secret" not in str(settings.model_dump())
+
+
+class TestLimitsPassThrough:
+    def test_timeout_effort_and_output_cap_reach_the_sdk(self):
+        p = provider(ok_response(Answer(text="hi")))
+        p.max_output_tokens, p.effort = 8000, "high"
+        p.generate(system="s", user="u", schema=Answer, timeout_s=42.0)
+        kw = p.client.responses.kwargs
+        assert kw["timeout"] == 42.0 and kw["max_output_tokens"] == 8000 and kw["reasoning"] == {"effort": "high"}
+
+    def test_build_llm_uses_the_settings(self):
+        llm = build_llm(Settings(_env_file=None, llm_provider="openai", openai_api_key="sk-test", llm_model="m",
+                                 llm_effort="low", llm_timeout_s=12, llm_max_output_tokens=3000))
+        assert (llm.model, llm.effort, llm.timeout_s, llm.max_output_tokens) == ("m", "low", 12, 3000)
+
+    def test_sdk_retries_are_off_so_the_time_budget_holds(self):
+        llm = build_llm(Settings(_env_file=None, llm_provider="openai", openai_api_key="sk-test"))
+        assert llm.client.max_retries == 0
+
+    def test_defaults_bound_the_cost(self):
+        s = Settings(_env_file=None)
+        assert s.llm_max_output_tokens <= 8000 and s.llm_review_deadline_s <= 90

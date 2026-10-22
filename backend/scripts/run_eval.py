@@ -49,11 +49,12 @@ def check(case: dict, profile: Profile, result: ReviewResult) -> dict[str, bool]
     if "max_edits" in expect:
         checks[f"at most {expect['max_edits']} edits"] = len(edits) <= expect["max_edits"]
     if expect.get("address"):
-        slot_exercise = {(s.day, e.slot_id): e.exercise_id for s in baseline_week.sessions for e in s.exercises}
-        touched = {slot_exercise.get((e.day, e.slot_id)) for e in edits if e.slot_id}
+        # Every slot that held the exercise must have been changed, or the exercise must be gone.
+        touched = {(e.day, e.slot_id) for e in edits if e.slot_id}
         remaining = {e.exercise_id for s in final_week.sessions for e in s.exercises}
         for exercise_id in expect["address"]:
-            checks[f"addresses {exercise_id}"] = exercise_id in touched or exercise_id not in remaining
+            slots = {(s.day, e.slot_id) for s in baseline_week.sessions for e in s.exercises if e.exercise_id == exercise_id}
+            checks[f"addresses {exercise_id}"] = exercise_id not in remaining or slots <= touched
     if expect.get("lower_volume_any"):
         before, after = weekly_muscle_sets(baseline_week), weekly_muscle_sets(final_week)
         checks["lowers some muscle's volume"] = any(after.get(m, 0) < before.get(m, 0) for m in VOLUME_TARGET_MUSCLES)

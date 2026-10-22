@@ -25,15 +25,16 @@ log = logging.getLogger(__name__)
 class OpenAIProvider:
     def __init__(self, *, api_key: str, model: str, effort: str = "medium", timeout_s: float = 60.0,
                  max_output_tokens: int = 16000, client: Any = None):
-        # One SDK retry for blips (429/5xx/connection); refine.py decides everything else.
-        self.client = client or OpenAI(api_key=api_key, timeout=timeout_s, max_retries=1)
+        # No SDK retries: the review's time budget decides how long we wait (see ai_review.py).
+        self.client = client or OpenAI(api_key=api_key, timeout=timeout_s, max_retries=0)
+        self.timeout_s = timeout_s
         self.model = model
         self.effort = effort
         self.max_output_tokens = max_output_tokens
         self.name = f"openai:{model}"
         self.usage = LLMUsage()
 
-    def generate(self, *, system: str, user: str, schema: type[T]) -> T:
+    def generate(self, *, system: str, user: str, schema: type[T], timeout_s: float | None = None) -> T:
         start = time.monotonic()
         try:
             response = self.client.responses.parse(
@@ -44,6 +45,7 @@ class OpenAIProvider:
                 reasoning={"effort": self.effort},
                 max_output_tokens=self.max_output_tokens,
                 store=False,
+                timeout=min(timeout_s, self.timeout_s) if timeout_s is not None else self.timeout_s,
             )
         except openai.APITimeoutError as err:
             raise LLMUnavailable("OpenAI request timed out") from err

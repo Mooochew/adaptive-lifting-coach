@@ -176,7 +176,7 @@ export default function Onboarding({ onDone, onCancel }: Props) {
 
       <div className="flex flex-wrap items-center gap-3">
         <button type="submit" className={btnPrimary} disabled={busy !== null || equipment.length === 0}>
-          {busy === "template" ? "Your coach is reviewing your program…" : "Build my program"}
+          {busy === "template" ? "Building your program…" : "Build my program"}
         </button>
         {onCancel && <button type="button" className={btn()} onClick={onCancel}>Cancel</button>}
         {equipment.length === 0 && (

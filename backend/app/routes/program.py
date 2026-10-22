@@ -1,3 +1,4 @@
+import threading
 from functools import lru_cache
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -27,9 +28,21 @@ def get_limiter() -> RateLimiter:
                        per_day=s.ai_reviews_per_day)
 
 
+@lru_cache
+def get_review_slots() -> threading.BoundedSemaphore:
+    """How many AI reviews may run at once; each holds a worker thread while the model thinks."""
+    return threading.BoundedSemaphore(get_settings().ai_max_concurrent_reviews)
+
+
+def client_key(request: Request) -> str:
+    """Who the rate limit counts against: the client address uvicorn reports (see rate_limit.py)."""
+    return request.client.host if request.client else "unknown"
+
+
 @router.post("/program/review", response_model=ReviewResponse)
 def program_review(req: TemplateRequest, request: Request, llm: LLMClient | None = Depends(get_llm),
-                   limiter: RateLimiter = Depends(get_limiter)) -> ReviewResponse:
+                   limiter: RateLimiter = Depends(get_limiter),
+                   slots: threading.BoundedSemaphore = Depends(get_review_slots)) -> ReviewResponse:
     """The standard plan, reviewed by the AI coach: a few bounded edits with reasons.
 
     Always returns a valid program: the standard plan when the AI is off, over the usage
@@ -39,11 +52,20 @@ def program_review(req: TemplateRequest, request: Request, llm: LLMClient | None
         build_week_one(req.profile)
     except TemplateError as err:
         raise HTTPException(status_code=422, detail=str(err)) from err
-    if llm is not None and not limiter.allow(request.client.host if request.client else "unknown"):
-        result = standard_plan(req.profile, "You've reached the limit of AI reviews for now, so this is the "
-                                            "standard plan. Try again later.", block=req.block)
-    else:
-        result = run_review(req.profile, llm, block=req.block)
+    if llm is None:
+        return ReviewResponse.of(run_review(req.profile, None, block=req.block))
+    if not slots.acquire(blocking=False):
+        return ReviewResponse.of(standard_plan(req.profile, "The AI coach is busy right now, so this is the "
+                                                            "standard plan. Try again in a minute.", block=req.block))
+    try:
+        if not limiter.allow(client_key(request)):
+            result = standard_plan(req.profile, "You've reached the limit of AI reviews for now, so this is the "
+                                                "standard plan. Try again later.", block=req.block)
+        else:
+            result = run_review(req.profile, llm, block=req.block,
+                                deadline_s=get_settings().llm_review_deadline_s)
+    finally:
+        slots.release()
     return ReviewResponse.of(result)
 
 

@@ -7,7 +7,7 @@ from app.llm.base import LLMUnavailable
 from app.llm.fake import FakeLLM
 from app.main import app
 from app.rate_limit import RateLimiter
-from app.routes.program import get_limiter, get_llm
+from app.routes.program import get_limiter, get_llm, get_review_slots
 
 client = TestClient(app)
 
@@ -109,3 +109,27 @@ class TestRateLimiter:
         limiter = RateLimiter(per_window=1, window_s=10, per_day=1)
         assert limiter.allow("a") and not limiter.allow("a") and not limiter.allow("b")
         assert limiter.used_today == 1
+
+
+def test_too_many_reviews_at_once_get_the_standard_plan(use):
+    import threading
+    slots = threading.BoundedSemaphore(1)
+    slots.acquire()                                   # one review already in progress
+    use(FakeLLM())
+    app.dependency_overrides[get_review_slots] = lambda: slots
+    data = post().json()
+    assert data["source"] == "baseline" and "busy" in data["fallback_reason"]
+
+
+def test_ai_off_does_not_use_up_the_limits(use):
+    limiter = RateLimiter(per_window=1, window_s=600, per_day=1)
+    use(None, limiter)
+    post(), post()
+    assert limiter.used_today == 0
+
+
+def test_standard_plan_keeps_guard_violations_like_template(use):
+    use(None)
+    review = post().json()
+    template = client.post("/program/template", json={"profile": PROFILE}).json()
+    assert review["notes"] == template["notes"]

@@ -127,3 +127,24 @@ class TestPrompt:
         assert "slot bench: bench_press" in user and "swaps: db_bench_press, push_up" in user
         assert "load lifter picks" in user and " lb " in user
         assert "<weekly_hard_sets_week_1>" in user and "quads 11" in user
+
+
+class TestTimeBudget:
+    def test_each_call_gets_only_the_time_left(self):
+        now = [0.0]
+
+        def slow(system, user):                       # each reply "takes" 30 s
+            now[0] += 30
+            return {"summary": "x", "edits": [{"kind": "sets", "day": 1, "slot_id": "bench", "sets_change": 9,
+                                               "new_exercise_id": None, "muscle": None, "reps": None,
+                                               "reps_max": None, "target_rpe": None, "weekly_sets": None,
+                                               "for_injury": False, "reason": "bad"}]}
+        llm = FakeLLM(slow, slow, slow)
+        result = run_review(lifter(), llm, deadline_s=70, clock=lambda: now[0])
+        assert [c["timeout_s"] for c in llm.calls] == [70, 40]       # third attempt: only 10 s left, not started
+        assert result.source == "baseline" and "unavailable" in result.fallback_reason
+
+    def test_no_time_no_call(self):
+        llm = FakeLLM()
+        result = run_review(lifter(), llm, deadline_s=0)
+        assert llm.calls == [] and result.source == "baseline"

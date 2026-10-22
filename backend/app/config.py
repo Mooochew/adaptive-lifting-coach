@@ -22,8 +22,9 @@ class Settings(BaseSettings):
     llm_provider: Literal["", "openai", "fake"] = ""
     llm_model: str = "gpt-6.1-sol"
     llm_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
-    llm_timeout_s: float = 60.0
-    llm_max_output_tokens: int = 16000      # includes the model's reasoning tokens
+    llm_timeout_s: float = 60.0             # one model call at most
+    llm_review_deadline_s: float = 90.0     # a whole review (all attempts); then the standard plan
+    llm_max_output_tokens: int = 8000       # per call, includes the model's reasoning tokens
     openai_api_key: SecretStr | None = None
 
     # AI review limits (each review may make up to 3 paid model calls). Over a limit, lifters
@@ -31,6 +32,7 @@ class Settings(BaseSettings):
     ai_reviews_per_window: int = 5
     ai_review_window_s: float = 600
     ai_reviews_per_day: int = 200
+    ai_max_concurrent_reviews: int = 4      # more at once get the standard plan (keeps the API responsive)
 
     # When true, LLM routes return recorded fixtures instead of calling the provider.
     demo_mode: bool = False

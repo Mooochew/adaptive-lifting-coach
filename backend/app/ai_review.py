@@ -13,11 +13,13 @@ The lifter always gets a valid program. Error details go to the server log, neve
 """
 
 import logging
+import time
+from collections.abc import Callable
 from typing import Literal
 
 from pydantic import Field
 
-from app.llm import LLMClient
+from app.llm import LLMClient, LLMUnavailable
 from app.prompts import program_review as prompt
 from app.refine import Checked, refine
 from app.review import AppliedEdit, ProgramReview, ReviewOutcome, baseline_outcome, review_program
@@ -25,6 +27,9 @@ from app.schemas import Model, Profile, Program
 from app.templates import build_week_one
 
 log = logging.getLogger(__name__)
+
+REVIEW_DEADLINE_S = 90.0     # a whole review, all attempts; below the browser's 120 s timeout
+MIN_CALL_S = 15.0            # don't start a model call with less time than this left
 
 
 class ReviewResult(Model):
@@ -47,7 +52,9 @@ class ReviewResponse(Model):
     @classmethod
     def of(cls, result: ReviewResult) -> "ReviewResponse":
         o = result.outcome
-        return cls(program=o.program, notes=o.notes, volume_shortfalls=o.shortfalls, source=result.source,
+        # The standard plan reports its guard violations among the notes, like /program/template.
+        notes = o.notes + (o.violations if result.source == "baseline" else [])
+        return cls(program=o.program, notes=notes, volume_shortfalls=o.shortfalls, source=result.source,
                    summary=o.summary if result.source == "ai" else "", edits=o.applied,
                    fallback_reason=result.fallback_reason)
 
@@ -57,17 +64,24 @@ def standard_plan(profile: Profile, reason: str, block: int = 1) -> ReviewResult
                         fallback_reason=reason)
 
 
-def run_review(profile: Profile, llm: LLMClient | None, block: int = 1) -> ReviewResult:
+def run_review(profile: Profile, llm: LLMClient | None, block: int = 1, deadline_s: float = REVIEW_DEADLINE_S,
+               clock: Callable[[], float] = time.monotonic) -> ReviewResult:
+    """Review within `deadline_s` seconds overall: each model call gets only the time left, and
+    when too little is left the lifter gets the standard plan instead of a slow answer."""
     baseline = baseline_outcome(profile, block)
     if llm is None:
         return ReviewResult(source="baseline", outcome=baseline, attempts=0,
                             fallback_reason="The AI coach isn't set up, so this is the standard plan.")
 
     week_one, _ = build_week_one(profile)
+    start = clock()
 
     def generate(feedback: list[str]) -> ProgramReview:
+        left = deadline_s - (clock() - start)
+        if left < MIN_CALL_S:
+            raise LLMUnavailable(f"review time budget used up ({deadline_s:g} s)")
         return llm.generate(system=prompt.SYSTEM_PROMPT, user=prompt.user_message(profile, week_one, feedback),
-                            schema=ProgramReview)
+                            schema=ProgramReview, timeout_s=left)
 
     def check(review: ProgramReview) -> Checked[ReviewOutcome]:
         outcome = review_program(review, profile, block)

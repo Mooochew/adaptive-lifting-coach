@@ -58,7 +58,7 @@ coach: a few small changes, each with a reason, around your injuries and trainin
 engine checks every change against its limits and falls back to the standard plan if anything is off,
 so the app works the same without a key.
 
-1. Create an OpenAI API key and **set a monthly spend limit** in the OpenAI dashboard (a review costs a few cents).
+1. Create an OpenAI API key and **set a monthly spend limit** in the OpenAI dashboard. A review typically costs a few cents; the worst case is bounded by the limits below (3 attempts of at most 8,000 output tokens, within 90 seconds).
 2. In `backend/.env` (copy `backend/.env.example`; never commit it):
    ```
    LLM_PROVIDER=openai
@@ -67,8 +67,10 @@ so the app works the same without a key.
    The model is `gpt-6.1-sol` by default (`LLM_MODEL`, `LLM_EFFORT`). Leave `LLM_PROVIDER` empty to turn the AI off.
 3. Restart the backend. "Build my program" now shows **Your coach's adjustments** above the board.
 
-Usage limits: 5 reviews per 10 minutes per user and 200 a day (`AI_REVIEWS_PER_WINDOW`, `AI_REVIEW_WINDOW_S`, `AI_REVIEWS_PER_DAY`). Over a limit,
-you get the standard plan.
+Usage limits: 5 reviews per 10 minutes per IP address, 200 a day in total (resets at midnight UTC), and 4 at
+once (`AI_REVIEWS_PER_WINDOW`, `AI_REVIEW_WINDOW_S`, `AI_REVIEWS_PER_DAY`, `AI_MAX_CONCURRENT_REVIEWS`). Over
+a limit, or past the 90-second budget (`LLM_REVIEW_DEADLINE_S`), you get the standard plan. Behind a hosting
+proxy, set uvicorn's `FORWARDED_ALLOW_IPS` to the proxy's address so each visitor counts separately (never `*`).
 
 To measure the AI on fixed test lifters (costs cents; needs the key):
 ```bash

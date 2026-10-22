@@ -41,6 +41,8 @@ class LLMClient(Protocol):
     name: str                 # e.g. "openai:gpt-6.1-sol", for logs and eval reports
     usage: LLMUsage
 
-    def generate(self, *, system: str, user: str, schema: type[T]) -> T:
-        """Return the reply parsed into `schema`, or raise InvalidOutput / LLMUnavailable."""
+    def generate(self, *, system: str, user: str, schema: type[T], timeout_s: float | None = None) -> T:
+        """Return the reply parsed into `schema`, or raise InvalidOutput / LLMUnavailable.
+
+        `timeout_s` caps this call (the review's remaining time budget); None = the client default."""
         ...

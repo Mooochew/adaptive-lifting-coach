@@ -25,11 +25,11 @@ class FakeLLM:
     def __init__(self, *replies: Reply, default: Reply | None = None):
         self.replies = list(replies)
         self.default = default
-        self.calls: list[dict[str, str]] = []
+        self.calls: list[dict[str, object]] = []
         self.usage = LLMUsage()
 
-    def generate(self, *, system: str, user: str, schema: type[T]) -> T:
-        self.calls.append({"system": system, "user": user})
+    def generate(self, *, system: str, user: str, schema: type[T], timeout_s: float | None = None) -> T:
+        self.calls.append({"system": system, "user": user, "timeout_s": timeout_s})
         self.usage.calls += 1
         reply = self.replies.pop(0) if self.replies else self.default
         if reply is None:

@@ -35,7 +35,9 @@ test("onboarding: a new lifter gets a program", async ({ page }) => {
   await page.getByLabel("Bench press weight in lb").fill("185");
   await page.getByLabel("Bench press reps").fill("5");
   await page.getByLabel(/Training background/).fill("3 years lifting, recover well");
+  const sent = page.waitForRequest("**/program/review");
   await page.getByRole("button", { name: "Build my program" }).click();
+  expect((await sent).postDataJSON().profile.training_background).toBe("3 years lifting, recover well");
 
   // The (scripted, e2e) AI coach reviewed the standard plan and its review is shown, labelled.
   const coach = page.getByRole("region", { name: "Your coach's adjustments" });
@@ -54,6 +56,46 @@ test("onboarding: a new lifter gets a program", async ({ page }) => {
   await expect(page.getByLabel("Set 1 weight", { exact: true })).toHaveValue("");
   await page.getByRole("button", { name: /Barbell Bench Press/ }).click();
   await expect(page.getByLabel("Set 1 weight", { exact: true })).toHaveValue("185");
+});
+
+test.describe("coach card", () => {
+  async function buildWith(page: import("@playwright/test").Page, change: (body: Record<string, unknown>) => void) {
+    await page.route("**/program/review", async (route) => {
+      const real = await route.fetch();
+      const body = await real.json();
+      change(body);
+      await route.fulfill({ response: real, json: body });
+    });
+    await page.goto("/");
+    await page.getByRole("button", { name: "Build my program" }).click();
+    await page.getByRole("button", { name: "Build my program" }).click();
+    await expect(page.getByRole("heading", { name: "The Board" })).toBeVisible();
+  }
+
+  test("shows each change with its reason and marks injury changes", async ({ page }) => {
+    await buildWith(page, (body) => {
+      body.summary = "One shoulder-friendly swap.";
+      body.edits = [{ kind: "swap", day: 3, slot_id: "ohp", muscle: null, for_injury: true,
+                      change: "Standing Overhead Press → Seated Dumbbell Shoulder Press",
+                      reason: "Overhead pressing bothers your shoulder." }];
+    });
+    const changes = page.getByRole("list", { name: "Changes to the standard plan" });
+    await expect(changes.getByRole("listitem")).toHaveCount(1);
+    await expect(changes).toContainText("Seated Dumbbell Shoulder Press");
+    await expect(changes).toContainText("Overhead pressing bothers your shoulder.");
+    await expect(changes).toContainText("Injury");
+  });
+
+  test("says when the standard plan was used instead", async ({ page }) => {
+    await buildWith(page, (body) => {
+      Object.assign(body, { source: "baseline", summary: "", edits: [],
+                            fallback_reason: "The AI coach is unavailable right now, so this is the standard plan." });
+    });
+    const card = page.getByRole("region", { name: "Coach adjustments" });
+    await expect(card).toContainText("Standard plan");
+    await expect(card).toContainText("The AI coach is unavailable right now");
+    await expect(page.getByText("AI-written")).toHaveCount(0);
+  });
 });
 
 test("onboarding: bodyweight only asks for equipment instead of failing", async ({ page }) => {

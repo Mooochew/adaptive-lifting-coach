@@ -80,6 +80,11 @@ describe("export / import", () => {
     delete old.review;
     expect(importData(JSON.stringify(old)).review).toBeNull();
     expect(importData(JSON.stringify({ ...sample(), review: { source: 7 } })).review).toBeNull();   // ignore junk
+    for (const broken of [{ ...review, source: "robot" }, { ...review, summary: 3 }, { ...review, fallbackReason: 1 },
+                          { ...review, edits: "x" }, { ...review, edits: [{ change: "a" }] },
+                          { ...review, edits: [{ reason: "b" }] }, { ...review, edits: [null] }]) {
+      expect(importData(JSON.stringify({ ...sample(), review: broken })).review).toBeNull();
+    }
   });
 
   it.each([

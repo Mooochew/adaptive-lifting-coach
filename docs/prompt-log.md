@@ -11,7 +11,8 @@ applies. See `docs/phase3-plan.md`.
 
 | Version | Date | Model | Change | Why | Eval result |
 |---|---|---|---|---|---|
-| v1 | 2026-10-21 | gpt-6.1-sol (medium effort) | First version (below) | — | Pending: runs once an OpenAI key is set up. Scripted-model tests pass (prompt contents, caching prefix, untrusted-notes containment, retry feedback). |
+| v1 | 2026-10-21 | gpt-6.1-sol (medium effort) | First version (below) | — | Not run live. Scripted-model tests pass (prompt contents, caching prefix, untrusted-notes containment, retry feedback). |
+| v2 | 2026-10-22 | gpt-6.1-sol (medium effort) | Injury edits no longer offer effort below the normal range; every session must keep an exercise; move volume a few sets at a time from the current number | Code review found the engine clamps effort back to the range (the card would have promised changes that didn't happen), and that large volume jumps often can't fit a schedule, which wastes paid retries | Pending: runs once an OpenAI key is set up. |
 
 ### v1: what's in it and which pattern each part uses
 

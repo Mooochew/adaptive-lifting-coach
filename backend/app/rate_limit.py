@@ -5,8 +5,14 @@ the counters in the server process: fine for one instance and a class demo; a mu
 deployment would need a shared store (e.g. Redis) or the host's rate limiting. Also set a monthly
 spend limit in the provider's dashboard as the final backstop.
 
-Clients are keyed by the connection's IP. X-Forwarded-For is deliberately ignored (anyone can send
-it); behind a trusted proxy, configure the server to report the real client address instead.
+Clients are keyed by the address uvicorn reports. Uvicorn rewrites it from X-Forwarded-For only when
+the request comes from an address in FORWARDED_ALLOW_IPS (default 127.0.0.1, i.e. a proxy or tunnel
+on the same machine, which append the real client address). So:
+  - directly exposed: the connection's IP; a client can't spoof it with headers
+  - behind a hosting proxy on another machine: every user shares the proxy's IP (one bucket for the
+    whole site) unless FORWARDED_ALLOW_IPS lists the proxy's address
+  - never set FORWARDED_ALLOW_IPS='*' on a public server: then anyone can pick their own bucket
+The daily cap resets at midnight UTC.
 """
 
 import threading

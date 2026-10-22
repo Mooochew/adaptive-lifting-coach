@@ -38,8 +38,9 @@ export class ApiError extends Error {
 const DEFAULT_TIMEOUT_MS = 15_000;
 // A sleeping free-tier server can take ~30 s to wake; /health is how we wake it.
 const HEALTH_TIMEOUT_MS = 30_000;
-// The AI coach may think and retry (up to 3 model calls) before answering.
-const REVIEW_TIMEOUT_MS = 180_000;
+// The AI coach may think and retry; the backend gives up after 90 s (LLM_REVIEW_DEADLINE_S) and
+// returns the standard plan, so this only fires if the backend itself is stuck.
+const REVIEW_TIMEOUT_MS = 120_000;
 
 type FetchLike = typeof fetch;
 
