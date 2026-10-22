@@ -257,7 +257,7 @@ def _add_set_for(muscle: str, week: Week, profile: Profile, previous: dict[str, 
         if info.equipment not in available:
             continue
         for session in by_free_time:
-            if any(ex.exercise_id == exercise_id for ex in session.exercises):
+            if any(ex.exercise_id == exercise_id or ex.slot_id == f"x_{exercise_id}" for ex in session.exercises):
                 continue
             new = make_prescription(f"x_{exercise_id}", info, profile, EXTRA_EXERCISE_SETS)
             minutes = new.sets * (new.rest_sec + WORK_SECONDS_PER_SET) / 60

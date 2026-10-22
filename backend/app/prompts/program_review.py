@@ -21,7 +21,7 @@ from app.review import MAX_EXERCISE_EDITS, MAX_REASON, MAX_SUMMARY, MAX_VOLUME_E
 from app.rules import GOALS, VOLUME_TARGET_MUSCLES, rules_for_exercise, target_rpe_range
 from app.schemas import Profile, Week
 
-PROMPT_VERSION = "v1"
+PROMPT_VERSION = "v2"
 
 
 def _library() -> str:
@@ -56,7 +56,8 @@ Edit kinds (fields not used by a kind must be null):
 - reps: set the rep range (day, slot_id, reps, reps_max) within the limit shown for that slot.
 - effort: set target_rpe (day, slot_id, target_rpe) within the range shown for that slot, in steps of 0.5.
 - volume: set a muscle's weekly hard sets for week 1 (muscle, weekly_sets). The engine decides which exercises \
-get the sets. Allowed per goal:
+get the sets, within the session time. Move a muscle a few sets at a time from its current number (listed after \
+week 1): a big jump often won't fit the schedule and will be rejected. Allowed per goal:
 {_bands()}
   Muscles with a volume target: {", ".join(VOLUME_TARGET_MUSCLES)}.
 - remove: drop an exercise from a slot (day, slot_id). Injury only.
@@ -66,8 +67,9 @@ muscle. The engine keeps each muscle at its weekly target, so to change how much
 a sets edit only moves work between exercises.
 
 Injury edits (for_injury = true) are only for a problem the lifter actually described. They may swap to any \
-exercise with available equipment that trains the same primary muscle, reduce sets by more than 1, remove an \
-exercise, or lower effort by up to 2 RPE below the usual range. They don't count toward the limits. Choose the least \
+exercise with available equipment that trains the same primary muscle, reduce sets by more than 1, or remove an \
+exercise (every session keeps at least one). Effort stays within each slot's range. They don't count toward the \
+limits. Choose the least \
 disruptive change that avoids the painful movement. Don't diagnose; if pain sounds persistent or severe, say in the \
 summary that a physio or doctor should look at it.
 

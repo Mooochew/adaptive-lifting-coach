@@ -17,9 +17,10 @@ outside the edit budget becomes a violation, which refine.py sends back to the A
 Any violation means the lifter gets the untouched baseline, never a half-edited program.
 """
 
+import re
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from app.exercises import EXERCISES, ExerciseInfo, Muscle, get_exercise
 from app.guards import weekly_muscle_sets
@@ -42,7 +43,6 @@ MAX_VOLUME_EDITS = 3
 MAX_EDITS = 12               # everything, a sanity cap
 MAX_REASON = 200
 MAX_SUMMARY = 400
-INJURY_RPE_DROP = 2          # an injury edit may set effort this far below the normal range
 
 ExerciseId = Literal[tuple(e.id for e in EXERCISES)]
 EditKind = Literal["swap", "sets", "reps", "effort", "remove", "volume"]
@@ -113,8 +113,9 @@ def review_program(review: ProgramReview, profile: Profile, block: int = 1) -> R
     problems = _validate(review, first, profile)
     applied: list[AppliedEdit] = []
     overrides: dict[str, float] = {}
+    edited_shortfalls = shortfalls
     if not problems:
-        applied, overrides, problems = _apply(review, first, profile)
+        applied, overrides, problems, edited_shortfalls = _apply(review, first, profile)
     if not problems:
         problems = _check_week_one(first, baseline_first, profile)
 
@@ -124,11 +125,27 @@ def review_program(review: ProgramReview, profile: Profile, block: int = 1) -> R
                              violations=problems, shortfalls=shortfalls)
 
     program, notes, violations = expand_block(first, profile, block, start_overrides=overrides)
+    if not violations:
+        # Edits mutate models in place, which skips their validators: re-check the whole program
+        # so the lifter can never receive one the API itself would reject (e.g. an empty session).
+        try:
+            Program.model_validate(program.model_dump())
+        except ValidationError as err:
+            violations = [f"the edited program isn't valid: {e['msg']}" for e in err.errors()]
     if violations:
         program, notes, _ = expand_block(baseline_first, profile, block)
-        applied = []
+        applied, edited_shortfalls = [], shortfalls
     return ReviewOutcome(program=program, summary=review.summary, applied=applied, notes=notes,
-                         violations=violations, shortfalls=shortfalls)
+                         violations=violations, shortfalls=edited_shortfalls)
+
+
+# Injury text that means "no injury" (so it can't unlock the injury-only edits).
+NO_INJURY = {"", "none", "no", "nope", "na", "n/a", "nil", "nothing", "no injuries", "no injury", "none so far",
+             "not applicable"}
+
+
+def has_injury(text: str) -> bool:
+    return re.sub(r"[^a-z/ ]", "", text.lower()).strip() not in NO_INJURY
 
 
 def allowed_alternatives(slot_id: str, current: str, session: Session, available: set[str]) -> list[str]:
@@ -151,7 +168,8 @@ def _validate(review: ProgramReview, first: Week, profile: Profile) -> list[str]
     if len(review.edits) > MAX_EDITS:
         problems.append(f"at most {MAX_EDITS} edits in total (got {len(review.edits)}).")
 
-    injured = bool(profile.injuries.strip())
+    injured = has_injury(profile.injuries)
+    removals: dict[int, int] = {}
     available = set(profile.equipment) | {"bodyweight"}
     band = goal_rules(profile.goal).volume.start_band
     slots = {(s.day, ex.slot_id): (s, ex) for s in first.sessions for ex in s.exercises}
@@ -225,17 +243,18 @@ def _validate(review: ProgramReview, first: Week, profile: Profile) -> list[str]
             elif e.reps is None or e.reps_max is None or not lo <= e.reps <= e.reps_max <= hi:
                 bad(f"rep range must be within {lo}-{hi} with reps <= reps_max.")
         elif e.kind == "effort":
+            # Same range for injury edits: the guards hold every week to it, and the card must
+            # only promise what the plan prescribes.
             rng = target_rpe_range(rules)
-            low = max(5.0, rng.low - (INJURY_RPE_DROP if e.for_injury else 0))
             rpe = e.target_rpe
-            if rpe is None or not low <= rpe <= rng.high or (rpe * 2) % 1:
-                bad(f"target RPE must be {low:g}-{rng.high:g} in steps of 0.5"
-                    + ("" if e.for_injury else " (lower only for an injury)") + ".")
+            if rpe is None or not rng.low <= rpe <= rng.high or (rpe * 2) % 1:
+                bad(f"target RPE must be {rng.low:g}-{rng.high:g} in steps of 0.5.")
         elif e.kind == "remove":
+            removals[session.day] = removals.get(session.day, 0) + 1
             if not e.for_injury:
                 bad("remove is only for injuries (set for_injury).")
-            elif len(session.exercises) <= 1:
-                bad("can't remove the only exercise in a session.")
+            elif len(session.exercises) - removals[session.day] < 1:
+                bad(f"that would leave Day {session.day} with no exercises; keep at least one.")
 
     if exercise_edits > MAX_EXERCISE_EDITS:
         problems.append(f"at most {MAX_EXERCISE_EDITS} exercise edits unless they're for an injury "
@@ -246,8 +265,10 @@ def _validate(review: ProgramReview, first: Week, profile: Profile) -> list[str]
 
 
 def _apply(review: ProgramReview, first: Week, profile: Profile
-           ) -> tuple[list[AppliedEdit], dict[str, float], list[str]]:
-    """Apply validated edits to week 1 in place. Returns (applied, volume overrides, problems)."""
+           ) -> tuple[list[AppliedEdit], dict[str, float], list[str], list[str]]:
+    """Apply validated edits to week 1 in place.
+
+    Returns (applied, volume overrides, problems, shortfalls of the edited week 1)."""
     applied: list[AppliedEdit] = []
     frozen: set[tuple[int, str]] = set()
     overrides: dict[str, float] = {}
@@ -256,51 +277,69 @@ def _apply(review: ProgramReview, first: Week, profile: Profile
     for e in review.edits:
         if e.kind == "volume":
             overrides[str(e.muscle)] = float(e.weekly_sets)
-            change = f"{e.muscle}: {baseline_sets.get(str(e.muscle), 0.0):g} → {e.weekly_sets:g} weekly sets in week 1"
+            change = ""                      # filled in below with the volume actually reached
         else:
             session = next(s for s in first.sessions if s.day == e.day)
             index, ex = next((i, x) for i, x in enumerate(session.exercises) if x.slot_id == e.slot_id)
-            change = _apply_to_slot(e, session, index, ex, profile)
-            frozen.add((session.day, ex.slot_id))
+            change, slot_id = _apply_to_slot(e, session, index, ex, profile)
+            frozen.add((session.day, slot_id))
         applied.append(AppliedEdit(kind=e.kind, day=e.day if e.kind != "volume" else None,
                                    slot_id=e.slot_id if e.kind != "volume" else None,
                                    muscle=str(e.muscle) if e.kind == "volume" else None,
                                    change=change, reason=e.reason.strip(), for_injury=e.for_injury))
 
-    # Keep every muscle at its target around the edits (edited slots stay as edited), then trim
-    # muscles the coach lowered.
+    # Keep every muscle at its target around the edits (edited slots stay as edited) and trim the
+    # muscles the coach lowered. Trimming also takes secondary work from other muscles, so refill
+    # and trim again until it settles.
     volume = goal_rules(profile.goal).volume
     problems: list[str] = []
-    fill_volume(first, profile, volume.start.low, overrides=overrides, frozen=frozen)
+    stuck: dict[str, float] = {}
+    shortfalls = fill_volume(first, profile, volume.start.low, overrides=overrides, frozen=frozen)
+    for _ in range(4):
+        stuck = {m: t for m, t in overrides.items()
+                 if weekly_muscle_sets(first).get(m, 0.0) > t and not reduce_volume(first, m, t, frozen)}
+        shortfalls = fill_volume(first, profile, volume.start.low, overrides=overrides, frozen=frozen)
+        if all(weekly_muscle_sets(first).get(m, 0.0) <= t for m, t in overrides.items()):
+            break
     after = weekly_muscle_sets(first)
     for muscle, target in overrides.items():
         if after.get(muscle, 0.0) < target:
             problems.append(f"{muscle}: can't fit {target:g} weekly sets in this schedule "
                             f"(got {after.get(muscle, 0.0):g}); choose a lower number.")
-        elif after.get(muscle, 0.0) > target and not reduce_volume(first, muscle, target, frozen):
+        elif muscle in stuck or after.get(muscle, 0.0) > target:
             problems.append(f"{muscle}: can't go as low as {target:g} weekly sets without dropping main lifts "
-                            f"(lowest is {weekly_muscle_sets(first).get(muscle, 0.0):g}); choose a higher number.")
-    return applied, overrides, problems
+                            f"(lowest is {after.get(muscle, 0.0):g}); choose a higher number.")
+    for a in applied:
+        if a.kind == "volume":
+            a.change = (f"{a.muscle}: {baseline_sets.get(a.muscle, 0.0):g} → {after.get(a.muscle, 0.0):g} "
+                        "weekly sets in week 1")
+    return applied, overrides, problems, shortfalls
 
 
-def _apply_to_slot(e: ProposedEdit, session: Session, index: int, ex, profile: Profile) -> str:
+def _apply_to_slot(e: ProposedEdit, session: Session, index: int, ex, profile: Profile) -> tuple[str, str]:
+    """Apply one slot edit. Returns (the change as the lifter sees it, the slot's id afterwards)."""
     info: ExerciseInfo = get_exercise(ex.exercise_id)
     if e.kind == "swap":
         new = get_exercise(e.new_exercise_id)
-        session.exercises[index] = make_prescription(ex.slot_id, new, profile, ex.sets)
-        return f"{info.name} → {new.name}"
+        # An accessory the engine added is named after its exercise (x_dip); rename it so the
+        # engine doesn't add the old exercise back under the same id.
+        slot_id = f"x_{new.id}" if ex.slot_id.startswith("x_") else ex.slot_id
+        if any(x.slot_id == slot_id for x in session.exercises if x is not ex):
+            slot_id = ex.slot_id
+        session.exercises[index] = make_prescription(slot_id, new, profile, ex.sets)
+        return f"{info.name} → {new.name}", slot_id
     if e.kind == "sets":
         old, ex.sets = ex.sets, ex.sets + e.sets_change
-        return f"{info.name}: {old} → {ex.sets} sets"
+        return f"{info.name}: {old} → {ex.sets} sets", ex.slot_id
     if e.kind == "reps":
         old = f"{ex.reps}-{ex.reps_max or ex.reps}"
         ex.reps, ex.reps_max = e.reps, e.reps_max
-        return f"{info.name}: {old} → {ex.reps}-{ex.reps_max} reps"
+        return f"{info.name}: {old} → {ex.reps}-{ex.reps_max} reps", ex.slot_id
     if e.kind == "effort":
         old, ex.target_rpe = ex.target_rpe, e.target_rpe
-        return f"{info.name}: RPE {old:g} → {ex.target_rpe:g}"
+        return f"{info.name}: RPE {old:g} → {ex.target_rpe:g}", ex.slot_id
     session.exercises.remove(ex)        # remove
-    return f"Removed {info.name}"
+    return f"Removed {info.name}", ex.slot_id
 
 
 def _check_week_one(first: Week, baseline: Week, profile: Profile) -> list[str]:
