@@ -23,3 +23,6 @@ Thumbs.db
 
 # Course instructions (local only)
 assignment.txt
+
+# AI eval reports (may contain test lifter text; regenerate with scripts/run_eval.py)
+backend/evals/results/

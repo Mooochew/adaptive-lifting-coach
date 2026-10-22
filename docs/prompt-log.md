@@ -1,6 +1,34 @@
 # Prompt Log
 
-Records each prompt version, what changed, and why, with example outputs.
+Every version of the AI prompts, what changed, why, and how it scored on the eval set
+(`backend/evals/profiles.json`, run with `python scripts/run_eval.py`).
 
-| Version | Prompt | Change | Result |
-|---|---|---|---|
+## Program review prompt (`backend/app/prompts/program_review.py`)
+
+The AI doesn't design programs. The rules engine writes an evidence-based plan, and the AI reviews
+it like a coach, proposing a few bounded edits (each with a reason) that the engine validates and
+applies. See `docs/phase3-plan.md`.
+
+| Version | Date | Model | Change | Why | Eval result |
+|---|---|---|---|---|---|
+| v1 | 2026-10-21 | gpt-6.1-sol (medium effort) | First version (below) | — | Pending: runs once an OpenAI key is set up. Scripted-model tests pass (prompt contents, caching prefix, untrusted-notes containment, retry feedback). |
+
+### v1: what's in it and which pattern each part uses
+
+| Part | Pattern | Purpose |
+|---|---|---|
+| "experienced, evidence-based coach … reviewing a plan a rules engine wrote … make only changes that clearly fit this lifter" | **Persona** | Sets a conservative, research-grounded voice; frames the job as reviewing, not designing |
+| Edit kinds, limits, volume bands (generated from `rules.py`), the full exercise library | **Context injection** | The model chooses; the engine does the maths. Bands and ids come from code, so they can't drift from what's enforced |
+| Week 1 with each slot's sets, reps, RPE range, engine-computed load, allowed swaps; weekly sets per muscle | **Context injection** | Gives the model exactly the options it may use, which cuts down rejected edits |
+| Three worked examples: no change needed; injury swap; an experienced lifter given *less* volume | **Few-shot** | Teaches that an empty edit list is fine and that experience alone doesn't mean more volume |
+| Strict JSON schema (exercise ids and muscles as enums) | **Structured output** | The reply is always parseable and can't name an unknown exercise |
+| Rejected edits returned in `<previous_attempt_problems>`, up to 3 attempts | **Iterative refinement** | The model fixes what broke the rules instead of the app silently dropping it |
+| Lifter text only in `<lifter_notes>` (angle brackets neutralised), with an instruction to treat it as information | **Prompt-injection defence** | Notes can inform edits but can't override rules; the engine enforces the limits regardless |
+| Identical system prompt for every lifter, first in the request | **Prompt caching** | Repeat requests reuse about 2,000 cached tokens (cheaper and faster) |
+
+### How to add a version
+
+1. Change the prompt and bump `PROMPT_VERSION`.
+2. Run `python scripts/run_eval.py --runs 3` (needs the key; costs cents).
+3. Add a row: what changed, why, and the eval numbers (first-try acceptance, fallbacks, checks met,
+   cost), plus anything you noticed reading the summaries and reasons.
