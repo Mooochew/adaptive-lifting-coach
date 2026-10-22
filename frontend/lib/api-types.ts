@@ -493,6 +493,12 @@ export interface components {
              */
             injuries: string;
             /**
+             * Training Background
+             * @description Optional free text, e.g. years lifting and what has or hasn't worked; read by the AI review
+             * @default
+             */
+            training_background: string;
+            /**
              * Units
              * @default lb
              * @enum {string}
@@ -731,6 +737,7 @@ export interface components {
             /** Max */
             max: number;
             ramp: components["schemas"]["Range"];
+            start_band: components["schemas"]["Range"];
         };
         /** WarmupStep */
         WarmupStep: {

@@ -1080,6 +1080,13 @@
             "title": "Injuries",
             "default": ""
           },
+          "training_background": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "Training Background",
+            "description": "Optional free text, e.g. years lifting and what has or hasn't worked; read by the AI review",
+            "default": ""
+          },
           "units": {
             "type": "string",
             "enum": [
@@ -1645,13 +1652,17 @@
           },
           "ramp": {
             "$ref": "#/components/schemas/Range"
+          },
+          "start_band": {
+            "$ref": "#/components/schemas/Range"
           }
         },
         "type": "object",
         "required": [
           "start",
           "max",
-          "ramp"
+          "ramp",
+          "start_band"
         ],
         "title": "VolumeRules"
       },

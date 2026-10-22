@@ -64,6 +64,10 @@ class Profile(Model):
     session_minutes: int = Field(ge=20, le=120)
     equipment: list[Equipment] = Field(min_length=1, max_length=6)
     injuries: str = Field(default="", max_length=MAX_TEXT)
+    training_background: str = Field(
+        default="", max_length=MAX_TEXT,
+        description="Optional free text, e.g. years lifting and what has or hasn't worked; read by the AI review",
+    )
     units: Units = "lb"
     lift_estimates: list[LiftEstimate] = Field(default=[], max_length=20)
 

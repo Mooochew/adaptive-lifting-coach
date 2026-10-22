@@ -71,6 +71,7 @@ export default function Onboarding({ onDone, onCancel }: Props) {
       session_minutes: minutes,
       equipment: [...equipment, "bodyweight"],
       injuries: injuries.trim(),
+      training_background: existing?.training_background ?? "",   // older saved profiles don't have it
       units,
       lift_estimates: MAIN_LIFTS.flatMap((l) => {
         const w = Number(lifts[l.id].weight);
