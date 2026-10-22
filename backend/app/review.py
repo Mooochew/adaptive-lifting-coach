@@ -97,6 +97,14 @@ class ReviewOutcome(Model):
 
 # ---------- Review ----------
 
+def baseline_outcome(profile: Profile, block: int = 1) -> ReviewOutcome:
+    """The engine's program with no edits (what the lifter gets when the AI can't help)."""
+    first, shortfalls = build_week_one(profile)
+    program, notes, violations = expand_block(first, profile, block)
+    return ReviewOutcome(program=program, summary="", applied=[], notes=notes, violations=violations,
+                         shortfalls=shortfalls)
+
+
 def review_program(review: ProgramReview, profile: Profile, block: int = 1) -> ReviewOutcome:
     """Validate and apply `review` to the engine's baseline for `profile`."""
     first, shortfalls = build_week_one(profile)
@@ -127,8 +135,8 @@ def allowed_alternatives(slot_id: str, current: str, session: Session, available
     """Exercises the template itself would accept in this slot (with the lifter's equipment)."""
     if slot_id in SLOTS:
         options = SLOTS[slot_id]
-    elif slot_id.startswith("x_"):     # an accessory the engine added for a muscle
-        options = [e for lst in ACCESSORIES.values() if current in lst for e in lst]
+    elif slot_id.startswith("x_"):     # an accessory the engine added: others for its own primary muscles
+        options = [e for m in get_exercise(current).primary for e in ACCESSORIES.get(m, []) if current in ACCESSORIES[m]]
     else:
         options = []
     in_session = {ex.exercise_id for ex in session.exercises}

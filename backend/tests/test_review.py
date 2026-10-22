@@ -4,7 +4,7 @@ import pytest
 
 from app.exercises import get_exercise
 from app.guards import weekly_muscle_sets
-from app.review import ProgramReview, ProposedEdit, review_program
+from app.review import ProgramReview, ProposedEdit, allowed_alternatives, review_program
 from app.schemas import Profile
 from app.templates import build_template
 
@@ -81,6 +81,15 @@ class TestSwap:
         p = lifter(equipment=["barbell", "dumbbell", "bodyweight"], days_per_week=3)
         outcome = review_program(review(edit("swap", day=1, slot_id="squat", new_exercise_id="leg_press")), p)
         assert "equipment" in problems(outcome)
+
+    def test_added_accessory_alternatives_train_the_same_muscle(self):
+        """x_face_pull (rear delts) must not list rows just because both appear among upper-back accessories."""
+        p = lifter()
+        session = build_template(p)[0].weeks[0].sessions[0]
+        face_pull = next(e for e in session.exercises if e.slot_id == "x_face_pull")
+        assert allowed_alternatives("x_face_pull", face_pull.exercise_id, session, set(FULL_GYM)) == []
+        outcome = review_program(review(edit("swap", day=1, slot_id="x_face_pull", new_exercise_id="db_row")), p)
+        assert "isn't a listed alternative" in problems(outcome)
 
     def test_cannot_swap_to_an_exercise_already_in_that_session(self):
         # Day 4 has leg press and Bulgarian split squats; the split squat is a listed leg-press alternative

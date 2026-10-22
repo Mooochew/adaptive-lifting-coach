@@ -103,7 +103,7 @@ Config in `backend/.env` (never committed): `LLM_PROVIDER=openai`, `LLM_MODEL=gp
 `OPENAI_API_KEY` (read as a secret, server-side only). Switching providers later means one new
 adapter plus two `.env` lines, then a light prompt retune checked with the eval profiles.
 
-Dependencies: `openai==3.36.0` (needs `httpx2` 2.16, upgraded from 2.13.1).
+Dependencies: `openai==3.36.0` (works with the already-pinned `httpx2` 2.13.1).
 
 ### OpenAI structured-output constraints that shape the schema
 
