@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     llm_max_output_tokens: int = 16000      # includes the model's reasoning tokens
     openai_api_key: SecretStr | None = None
 
+    # AI review limits (each review may make up to 3 paid model calls). Over a limit, lifters
+    # get the standard plan instead.
+    ai_reviews_per_window: int = 5
+    ai_review_window_s: float = 600
+    ai_reviews_per_day: int = 200
+
     # When true, LLM routes return recorded fixtures instead of calling the provider.
     demo_mode: bool = False
 
