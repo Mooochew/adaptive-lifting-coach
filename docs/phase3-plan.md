@@ -1,6 +1,6 @@
 # Phase 3 plan: the AI coach
 
-Status: **planning** (2026-10-21). Branch for step 2: `phase3-step2-ai-program-review`.
+Status: step 2 built and reviewed (2026-10-22), see `docs/HANDOFF.md`. Branch for step 2: `phase3-step2-ai-program-review`.
 
 ## Where things stand
 

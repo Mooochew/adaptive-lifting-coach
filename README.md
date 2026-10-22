@@ -5,7 +5,7 @@ An AI strength coach that builds a 4-week training block, then adapts it every w
 - **Frontend:** Next.js + TypeScript (`frontend/`)
 - **Backend:** Python FastAPI: training math, rules, and the AI coach (`backend/`)
 
-> Work in progress. How the AI is prompted, and why: [docs/prompt-log.md](docs/prompt-log.md). Plan: [docs/phase3-plan.md](docs/phase3-plan.md).
+> Work in progress. Start here: [docs/HANDOFF.md](docs/HANDOFF.md). How the AI is prompted, and why: [docs/prompt-log.md](docs/prompt-log.md). Plan: [docs/phase3-plan.md](docs/phase3-plan.md).
 
 ## Requirements
 
