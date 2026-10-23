@@ -145,6 +145,8 @@ def main(argv: list[str] | None = None) -> Path:
     parser.add_argument("--fake", action="store_true", help="use the scripted model (no key, no cost)")
     parser.add_argument("--out", type=Path, default=RESULTS)
     args = parser.parse_args(argv)
+    if hasattr(sys.stdout, "reconfigure"):      # a redirected Windows console is cp1252, which can't print ✓
+        sys.stdout.reconfigure(encoding="utf-8")
 
     cases = json.loads(CASES.read_text(encoding="utf-8"))["cases"]
     if args.cases:

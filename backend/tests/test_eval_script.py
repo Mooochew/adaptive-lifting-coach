@@ -1,6 +1,8 @@
 """The eval script works end to end with the scripted model (no key, no cost)."""
 
+import io
 import json
+import sys
 
 from app.llm.fake import FakeLLM
 from app.schemas import Profile
@@ -19,6 +21,15 @@ def test_every_case_is_a_valid_profile_and_runs(tmp_path):
     assert all(f"## {c['id']}" in text for c in cases())
     rows = json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))
     assert len(rows) == 10 and {r["source"] for r in rows} == {"ai"}
+
+
+def test_summary_prints_on_a_windows_console(tmp_path, monkeypatch):
+    # A redirected stdout on Windows is cp1252, which has no ✓.
+    raw = io.BytesIO()
+    monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(raw, encoding="cp1252"))
+    main(["--fake", "--cases", "shoulder-overhead", "--out", str(tmp_path)])
+    sys.stdout.flush()
+    assert "Accepted on the first try" in raw.getvalue().decode("utf-8")
 
 
 def test_checks_catch_an_unaddressed_injury_and_credit_a_fix():

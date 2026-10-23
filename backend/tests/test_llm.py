@@ -77,6 +77,16 @@ class TestOpenAIProvider:
         with pytest.raises(LLMUnavailable, match=says):
             provider(error).generate(system="s", user="u", schema=Answer)
 
+    @pytest.mark.parametrize("body, says", [
+        ({"type": "insufficient_quota", "code": "credit_balance_exhausted"}, "no credits.*credit_balance_exhausted"),
+        ({"type": "insufficient_quota", "code": "insufficient_quota"}, "no credits"),
+        ({"type": "requests", "code": "rate_limit_exceeded"}, "rate limit.*rate_limit_exceeded"),
+    ])
+    def test_billing_and_rate_limits_are_told_apart(self, body, says):
+        err = openai.RateLimitError("boom", response=httpx2.Response(429, request=REQUEST), body=body)
+        with pytest.raises(LLMUnavailable, match=says):
+            provider(err).generate(system="s", user="u", schema=Answer)
+
     def test_refusal_falls_back(self):
         refusal = SimpleNamespace(type="message", content=[SimpleNamespace(type="refusal", refusal="no")])
         with pytest.raises(LLMUnavailable, match="declined"):

@@ -51,8 +51,10 @@ class OpenAIProvider:
             raise LLMUnavailable("OpenAI request timed out") from err
         except (openai.AuthenticationError, openai.PermissionDeniedError) as err:
             raise LLMUnavailable("OpenAI rejected the credentials (check OPENAI_API_KEY)") from err
-        except openai.RateLimitError as err:
-            raise LLMUnavailable("OpenAI rate limit or quota reached") from err
+        except openai.RateLimitError as err:        # 429 covers both an empty balance and real rate limits
+            if "insufficient_quota" in (err.type, err.code):
+                raise LLMUnavailable(f"OpenAI account has no credits left; add credits in billing ({err.code})") from err
+            raise LLMUnavailable(f"OpenAI rate limit reached ({err.code})") from err
         except openai.BadRequestError as err:      # our request or schema is wrong: a bug, not the AI's mistake
             raise LLMUnavailable(f"OpenAI rejected the request: {err.message}") from err
         except (openai.APIConnectionError, openai.APIStatusError) as err:
