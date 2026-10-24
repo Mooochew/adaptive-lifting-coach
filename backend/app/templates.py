@@ -205,14 +205,15 @@ def _fits(week: Week, session: Session, extra_minutes: float, minutes: int) -> b
 
 
 def _within_caps(week: Week, session: Session, change: dict[str, float], volume_max: float,
-                 previous: dict[str, float] | None, ramp_max: float) -> bool:
+                 previous: dict[str, float] | None, ramp_max: float,
+                 caps: dict[str, float] | None = None) -> bool:
     """Adding `change` (muscle -> sets) to `session` keeps every muscle under the weekly max,
-    the weekly ramp limit, and the per-session ceiling."""
+    the weekly ramp limit, the per-session ceiling, and its own cap in `caps` if it has one."""
     weekly = weekly_muscle_sets(week)
     in_session = session_muscle_sets(session)
     for muscle, add in change.items():
         after = weekly.get(muscle, 0.0) + add
-        if after > volume_max:
+        if after > volume_max or (caps and muscle in caps and after > caps[muscle]):
             return False
         if previous is not None and after - previous.get(muscle, 0.0) > ramp_max:
             return False
@@ -222,7 +223,8 @@ def _within_caps(week: Week, session: Session, change: dict[str, float], volume_
 
 
 def _add_set_for(muscle: str, week: Week, profile: Profile, previous: dict[str, float] | None,
-                 frozen: set[tuple[int, str]] = frozenset(), excluded: dict[int, set[str]] | None = None) -> bool:
+                 frozen: set[tuple[int, str]] = frozenset(), excluded: dict[int, set[str]] | None = None,
+                 caps: dict[str, float] | None = None) -> bool:
     """Add one set to an exercise training `muscle` directly, or add a fitting accessory.
 
     Spreads volume: prefers the session where this muscle has done the least so far.
@@ -244,7 +246,8 @@ def _add_set_for(muscle: str, week: Week, profile: Profile, previous: dict[str, 
     for _, session, ex, info in sorted(candidates, key=lambda c: c[0]):
         one_set = (ex.rest_sec + WORK_SECONDS_PER_SET) / 60
         if (_fits(week, session, one_set, profile.session_minutes)
-                and _within_caps(week, session, muscle_credits(info.id), volume.max, previous, volume.ramp.high)):
+                and _within_caps(week, session, muscle_credits(info.id), volume.max, previous, volume.ramp.high,
+                                 caps)):
             ex.sets += 1
             return True
 
@@ -266,7 +269,7 @@ def _add_set_for(muscle: str, week: Week, profile: Profile, previous: dict[str, 
             minutes = new.sets * (new.rest_sec + WORK_SECONDS_PER_SET) / 60
             change = {m: c * new.sets for m, c in muscle_credits(exercise_id).items()}
             if (_fits(week, session, minutes, profile.session_minutes)
-                    and _within_caps(week, session, change, volume.max, previous, volume.ramp.high)):
+                    and _within_caps(week, session, change, volume.max, previous, volume.ramp.high, caps)):
                 session.exercises.append(new)
                 return True
     return False
@@ -275,9 +278,11 @@ def _add_set_for(muscle: str, week: Week, profile: Profile, previous: dict[str, 
 def fill_volume(week: Week, profile: Profile, target: float, previous: Week | None = None,
                 overrides: dict[str, float] | None = None,
                 frozen: set[tuple[int, str]] = frozenset(),
-                excluded: dict[int, set[str]] | None = None) -> list[str]:
+                excluded: dict[int, set[str]] | None = None,
+                caps: dict[str, float] | None = None) -> list[str]:
     """Raise every targeted muscle to `target` weekly sets (or its own target in `overrides`)
-    where the schedule allows, without touching `frozen` slots.
+    where the schedule allows, without touching `frozen` slots or taking a muscle in `caps`
+    above its cap (secondary work counts, e.g. deadlifts add half a set of quads).
 
     Returns shortfalls for muscles that can't get there (too few days/minutes/equipment).
     """
@@ -291,7 +296,7 @@ def fill_volume(week: Week, profile: Profile, target: float, previous: Week | No
         if not short:
             break
         muscle = max(short, key=lambda m: target_of(m) - current.get(m, 0.0))
-        if not _add_set_for(muscle, week, profile, previous_sets, frozen, excluded):
+        if not _add_set_for(muscle, week, profile, previous_sets, frozen, excluded, caps):
             stuck.add(muscle)
     current = weekly_muscle_sets(week)
     return [f"{m}: {current.get(m, 0.0):g} of {target_of(m):g} weekly sets (not enough time or equipment)"

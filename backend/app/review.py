@@ -17,6 +17,7 @@ outside the edit budget becomes a violation, which refine.py sends back to the A
 Any violation means the lifter gets the untouched baseline, never a half-edited program.
 """
 
+import math
 import re
 from typing import Literal
 
@@ -142,6 +143,27 @@ def review_program(review: ProgramReview, profile: Profile, block: int = 1) -> R
         applied, edited_shortfalls = [], shortfalls
     return ReviewOutcome(program=program, summary=review.summary, applied=applied, notes=notes,
                          violations=violations, shortfalls=edited_shortfalls)
+
+
+def volume_floors(first: Week, profile: Profile) -> dict[str, int | None]:
+    """The lowest week-1 weekly sets a volume edit can set for each muscle, on its own: the bottom of
+    the goal's band, or higher where the schedule's main lifts keep a muscle above it. None means no
+    number in the band works (topping other muscles back up adds secondary sets to this one). The
+    prompt shows these so the AI doesn't spend paid retries discovering them."""
+    # Tried number by number from the bottom: trimming one muscle and topping the others back up
+    # isn't monotonic, so "as low as possible" can land somewhere a specific number wouldn't.
+    band = goal_rules(profile.goal).volume.start_band
+    floors: dict[str, int | None] = {}
+    for muscle in VOLUME_TARGET_MUSCLES:
+        floors[muscle] = None
+        for sets in range(math.ceil(band.low), math.floor(band.high) + 1):
+            probe = ProposedEdit(kind="volume", day=None, slot_id=None, new_exercise_id=None, muscle=muscle,
+                                 sets_change=None, reps=None, reps_max=None, target_rpe=None, weekly_sets=sets,
+                                 for_injury=False, reason="probe")
+            if not _apply(ProgramReview(summary="probe", edits=[probe]), first.model_copy(deep=True), profile)[2]:
+                floors[muscle] = sets
+                break
+    return floors
 
 
 # Injury text that means "no injury" (so it can't unlock the injury-only edits).
@@ -299,25 +321,29 @@ def _apply(review: ProgramReview, first: Week, profile: Profile
 
     # Keep every muscle at its target around the edits (edited slots stay as edited) and trim the
     # muscles the coach lowered. Trimming also takes secondary work from other muscles, so refill
-    # and trim again until it settles.
+    # and trim again until it settles. A lowered muscle is also a cap, so topping the others up
+    # can't push it back over with their secondary work.
     volume = goal_rules(profile.goal).volume
+    caps = {m: t for m, t in overrides.items() if t < baseline_sets.get(m, 0.0)}
     problems: list[str] = []
-    stuck: dict[str, float] = {}
     shortfalls = fill_volume(first, profile, volume.start.low, overrides=overrides, frozen=frozen,
-                                 excluded=excluded)
+                             excluded=excluded, caps=caps)
     for _ in range(4):
-        stuck = {m: t for m, t in overrides.items()
-                 if weekly_muscle_sets(first).get(m, 0.0) > t and not reduce_volume(first, m, t, frozen)}
+        for m, t in overrides.items():
+            if weekly_muscle_sets(first).get(m, 0.0) > t:
+                reduce_volume(first, m, t, frozen)
         shortfalls = fill_volume(first, profile, volume.start.low, overrides=overrides, frozen=frozen,
-                                 excluded=excluded)
+                                 excluded=excluded, caps=caps)
         if all(weekly_muscle_sets(first).get(m, 0.0) <= t for m, t in overrides.items()):
             break
+    # Secondary work comes in half sets, so a muscle may land within a set of its number, but
+    # never outside the band.
     after = weekly_muscle_sets(first)
     for muscle, target in overrides.items():
-        if after.get(muscle, 0.0) < target:
+        if after.get(muscle, 0.0) <= target - 1 or after.get(muscle, 0.0) < volume.start_band.low:
             problems.append(f"{muscle}: can't fit {target:g} weekly sets in this schedule "
                             f"(got {after.get(muscle, 0.0):g}); choose a lower number.")
-        elif muscle in stuck or after.get(muscle, 0.0) > target:
+        elif after.get(muscle, 0.0) >= target + 1 or after.get(muscle, 0.0) > volume.start_band.high:
             problems.append(f"{muscle}: can't go as low as {target:g} weekly sets without dropping main lifts "
                             f"(lowest is {after.get(muscle, 0.0):g}); choose a higher number.")
     for a in applied:

@@ -5,7 +5,7 @@ from app.exercises import EXERCISES
 from app.llm.base import InvalidOutput, LLMUnavailable
 from app.llm.fake import FakeLLM
 from app.prompts import program_review as prompt
-from app.review import baseline_outcome
+from app.review import baseline_outcome, volume_floors
 from app.schemas import Profile
 from app.templates import build_week_one
 
@@ -126,7 +126,21 @@ class TestPrompt:
         user = prompt.user_message(p, build_week_one(p)[0])
         assert "slot bench: bench_press" in user and "swaps: db_bench_press, push_up" in user
         assert "load lifter picks" in user and " lb " in user
-        assert "<weekly_hard_sets_week_1>" in user and "quads 11" in user
+        assert "<weekly_hard_sets_week_1>" in user and "quads 11 (lowest " in user
+
+    def test_user_message_shows_the_lowest_volume_the_engine_accepts(self):
+        p = lifter()
+        first = build_week_one(p)[0]
+        user = prompt.user_message(p, first)
+        for muscle, floor in volume_floors(first, p).items():
+            assert f"{muscle} " in user and f"(lowest {floor})" in user
+        assert "lowest" in prompt.SYSTEM_PROMPT and "never go below" in prompt.SYSTEM_PROMPT
+
+    def test_system_prompt_prefers_a_swap_that_keeps_the_movement(self):
+        s = prompt.SYSTEM_PROMPT
+        assert "Prefer a swap that keeps the movement pattern" in s
+        assert "Remove only when no listed option avoids the painful movement" in s
+        assert prompt.PROMPT_VERSION == "v3"
 
 
 class TestTimeBudget:

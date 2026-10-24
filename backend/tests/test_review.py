@@ -4,9 +4,10 @@ import pytest
 
 from app.exercises import get_exercise
 from app.guards import weekly_muscle_sets
-from app.review import ProgramReview, ProposedEdit, allowed_alternatives, review_program
+from app.review import ProgramReview, ProposedEdit, allowed_alternatives, review_program, volume_floors
+from app.rules import VOLUME_TARGET_MUSCLES, goal_rules
 from app.schemas import Profile
-from app.templates import build_template
+from app.templates import build_template, build_week_one
 
 FULL_GYM = ["barbell", "dumbbell", "machine", "cable", "kettlebell", "bodyweight"]
 
@@ -163,6 +164,41 @@ class TestVolume:
     def test_band(self, goal, sets, ok):
         outcome = review_program(review(edit("volume", muscle="chest", weekly_sets=sets)), lifter(goal=goal))
         assert (not any("band" in v for v in outcome.violations)) == ok
+
+    @pytest.mark.parametrize("p", [lifter(), lifter(goal="strength", days_per_week=3, session_minutes=60),
+                                   lifter(experience="advanced", days_per_week=5, session_minutes=75)])
+    def test_lowest_volume_is_exactly_what_the_engine_accepts(self, p):
+        # The prompt shows these numbers up front, so the AI doesn't spend paid retries finding them.
+        first = build_week_one(p)[0]
+        band = goal_rules(p.goal).volume.start_band
+        floors = volume_floors(first, p)
+        assert set(floors) == set(VOLUME_TARGET_MUSCLES)
+        for muscle, floor in floors.items():
+            if floor is None:       # nothing in the band fits: every choice is rejected
+                assert all(review_program(review(edit("volume", muscle=muscle, weekly_sets=s)), p).violations
+                           for s in range(int(band.low), int(band.high) + 1)), muscle
+                continue
+            assert band.low <= floor <= band.high
+            assert review_program(review(edit("volume", muscle=muscle, weekly_sets=floor)), p).violations == [], muscle
+            if floor - 1 >= band.low:
+                assert review_program(review(edit("volume", muscle=muscle, weekly_sets=floor - 1)), p).violations, muscle
+
+    def test_topping_other_muscles_up_does_not_undo_a_lowered_muscle(self):
+        # The eval's low-volume lifter: deadlifts and other refills add half-sets of quads, which used
+        # to land every quad target 0.5 too high, so no quad number was ever accepted.
+        p = Profile(goal="hypertrophy", experience="advanced", days_per_week=6, session_minutes=75,
+                    equipment=["barbell", "dumbbell", "machine", "cable"])
+        for sets in (8, 11):
+            outcome = review_program(review(edit("volume", muscle="quads", weekly_sets=sets)), p)
+            assert outcome.violations == [], sets
+            assert abs(weekly_muscle_sets(outcome.program.weeks[0])["quads"] - sets) < 1
+
+    def test_lowest_volume_leaves_week_one_untouched(self):
+        p = lifter()
+        first = build_week_one(p)[0]
+        before = first.model_dump()
+        volume_floors(first, p)
+        assert first.model_dump() == before
 
     def test_only_targeted_muscles_and_at_most_three(self):
         assert "abs" in problems(review_program(review(edit("volume", muscle="abs", weekly_sets=8)), lifter()))

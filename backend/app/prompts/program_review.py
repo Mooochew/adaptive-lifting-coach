@@ -1,4 +1,4 @@
-"""Prompt for the AI program review (v1). See docs/prompt-log.md for the history and eval results.
+"""Prompt for the AI program review (v3). See docs/prompt-log.md for the history and eval results.
 
 Prompt-engineering patterns used here:
   Persona              a conservative, evidence-based coach reviewing another coach's plan
@@ -17,11 +17,18 @@ message, inside <lifter_notes>, with angle brackets neutralised so they can't cl
 
 from app.exercises import EXERCISES, get_exercise
 from app.guards import weekly_muscle_sets
-from app.review import MAX_EXERCISE_EDITS, MAX_REASON, MAX_SUMMARY, MAX_VOLUME_EDITS, allowed_alternatives
+from app.review import (
+    MAX_EXERCISE_EDITS,
+    MAX_REASON,
+    MAX_SUMMARY,
+    MAX_VOLUME_EDITS,
+    allowed_alternatives,
+    volume_floors,
+)
 from app.rules import GOALS, VOLUME_TARGET_MUSCLES, rules_for_exercise, target_rpe_range
 from app.schemas import Profile, Week
 
-PROMPT_VERSION = "v2"
+PROMPT_VERSION = "v3"
 
 
 def _library() -> str:
@@ -56,8 +63,10 @@ Edit kinds (fields not used by a kind must be null):
 - reps: set the rep range (day, slot_id, reps, reps_max) within the limit shown for that slot.
 - effort: set target_rpe (day, slot_id, target_rpe) within the range shown for that slot, in steps of 0.5.
 - volume: set a muscle's weekly hard sets for week 1 (muscle, weekly_sets). The engine decides which exercises \
-get the sets, within the session time. Move a muscle a few sets at a time from its current number (listed after \
-week 1): a big jump often won't fit the schedule and will be rejected. Allowed per goal:
+get the sets, within the session time. Each muscle's current number is listed after week 1 with the lowest \
+number the engine accepts for it in this schedule (main lifts keep some muscles above the band's bottom); never go \
+below that lowest number. "can't change" means no volume edit for that muscle fits this schedule. The week lands \
+within a set of your number. Allowed per goal:
 {_bands()}
   Muscles with a volume target: {", ".join(VOLUME_TARGET_MUSCLES)}.
 - remove: drop an exercise from a slot (day, slot_id). Injury only.
@@ -69,8 +78,9 @@ a sets edit only moves work between exercises.
 Injury edits (for_injury = true) are only for a problem the lifter actually described. They may swap to any \
 exercise with available equipment that trains the same primary muscle, reduce sets by more than 1, or remove an \
 exercise (every session keeps at least one). Effort stays within each slot's range. They don't count toward the \
-limits. Choose the least \
-disruptive change that avoids the painful movement. Don't diagnose; if pain sounds persistent or severe, say in the \
+limits. Choose the least disruptive change that avoids the painful movement. Prefer a swap that keeps the movement \
+pattern (another press for a press, another hip or hamstring exercise for a hinge) and doesn't repeat an exercise \
+already in that session. Remove only when no listed option avoids the painful movement. Don't diagnose; if pain sounds persistent or severe, say in the \
 summary that a physio or doctor should look at it.
 
 ## How to judge
@@ -155,10 +165,12 @@ def user_message(profile: Profile, week_one: Week, feedback: list[str] | None = 
         lines.append(f"Day {session.day} ({session.focus}):")
         lines += [_slot_line(session.day, ex, session, profile, available) for ex in session.exercises]
     volume = weekly_muscle_sets(week_one)
+    floors = volume_floors(week_one, profile)
+    lowest = lambda m: "can't change" if floors[m] is None else f"lowest {floors[m]}"
     lines += [
         "</week_1>",
         "<weekly_hard_sets_week_1>",
-        ", ".join(f"{m} {volume.get(m, 0.0):g}" for m in VOLUME_TARGET_MUSCLES),
+        ", ".join(f"{m} {volume.get(m, 0.0):g} ({lowest(m)})" for m in VOLUME_TARGET_MUSCLES),
         "</weekly_hard_sets_week_1>",
         "Weeks 2-4 ramp up from week 1 and week 5 is a deload; the engine handles both.",
     ]
