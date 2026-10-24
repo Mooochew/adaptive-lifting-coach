@@ -3,7 +3,7 @@ import { ApiError, type ApiClient } from "./api";
 import type { AppData, DataStore } from "./storage";
 import { createAppStore } from "./store";
 import { benchSets, emptyMetrics, makeProgram, profile, program } from "./test-fixtures";
-import type { MetricsRequest } from "./types";
+import type { MetricsRequest, Profile } from "./types";
 
 function memoryStorage(failSaves = false): DataStore & { saved: AppData | null } {
   const s = {
@@ -22,6 +22,7 @@ function memoryStorage(failSaves = false): DataStore & { saved: AppData | null }
 function fakeApi(overrides: Partial<ApiClient> = {}) {
   const metricsCalls: MetricsRequest[] = [];
   const templateCalls: number[] = [];
+  const reviewCalls: { profile: Profile; block: number }[] = [];
   const api: ApiClient = {
     health: async () => ({ ok: true, demo_mode: false }),
     rules: async () => { throw new Error("unused"); },
@@ -31,6 +32,13 @@ function fakeApi(overrides: Partial<ApiClient> = {}) {
       templateCalls.push(block);
       return { program: makeProgram(block), notes: [], volume_shortfalls: block === 1 ? [] : ["biceps: 6 of 10"] };
     },
+    review: async (p, block = 1) => {
+      reviewCalls.push({ profile: p, block });
+      return { program: makeProgram(block), notes: [], volume_shortfalls: block === 1 ? [] : ["biceps: 6 of 10"],
+               source: "ai", summary: "One shoulder-friendly swap.", fallback_reason: null,
+               edits: [{ kind: "swap", day: 1, slot_id: "bench", muscle: null, for_injury: true,
+                         change: "Barbell Bench Press → Dumbbell Bench Press", reason: "Easier on your shoulder." }] };
+    },
     advance: async (req) => ({ program: req.program, changes: [], notes: [] }),
     metrics: async (req) => {
       metricsCalls.push(req);
@@ -38,7 +46,7 @@ function fakeApi(overrides: Partial<ApiClient> = {}) {
     },
     ...overrides,
   };
-  return { api, metricsCalls, templateCalls };
+  return { api, metricsCalls, templateCalls, reviewCalls };
 }
 
 beforeEach(() => vi.useFakeTimers());
@@ -79,12 +87,12 @@ describe("app store", () => {
   });
 
   it("a new block keeps history and increments the block number (reviewer m4)", async () => {
-    const { api, templateCalls } = fakeApi();
+    const { api, reviewCalls } = fakeApi();
     const store = createAppStore({ api, storage: memoryStorage() });
     await store.getState().loadDemo();
     await store.getState().startFromProfile(profile);
 
-    expect(templateCalls).toEqual([2]);
+    expect(reviewCalls.map((c) => c.block)).toEqual([2]);
     expect(store.getState().program?.block).toBe(2);
     expect(store.getState().logs).toHaveLength(3);                     // block 1 history kept
     expect(store.getState().volumeShortfalls).toEqual(["biceps: 6 of 10"]);
@@ -235,6 +243,40 @@ describe("app store", () => {
     second.getState().hydrate();
     expect(second.getState().hydrated).toBe(true);
     expect(second.getState().logs).toHaveLength(3);
+  });
+
+  it("a new program is reviewed by the AI coach; the review is kept and saved", async () => {
+    const storage = memoryStorage();
+    const { api, reviewCalls } = fakeApi();
+    const store = createAppStore({ api, storage });
+    await store.getState().startFromProfile({ ...profile, training_background: "6 years lifting" });
+
+    expect(reviewCalls[0].profile.training_background).toBe("6 years lifting");
+    const review = store.getState().review;
+    expect(review?.source).toBe("ai");
+    expect(review?.summary).toBe("One shoulder-friendly swap.");
+    expect(review?.edits[0].reason).toBe("Easier on your shoulder.");
+    expect(storage.saved?.review?.summary).toBe("One shoulder-friendly swap.");
+  });
+
+  it("the standard plan's note is kept when the AI couldn't help", async () => {
+    const { api } = fakeApi({
+      review: async () => ({ program: makeProgram(1), notes: [], volume_shortfalls: [], source: "baseline",
+                             summary: "", edits: [], fallback_reason: "The AI coach is unavailable right now." }),
+    });
+    const store = createAppStore({ api, storage: memoryStorage() });
+    await store.getState().startFromProfile(profile);
+    expect(store.getState().review).toMatchObject({ source: "baseline", fallbackReason: "The AI coach is unavailable right now." });
+  });
+
+  it("the demo athlete and a reset have no coach review", async () => {
+    const store = createAppStore({ ...fakeApi(), storage: memoryStorage() });
+    await store.getState().startFromProfile(profile);
+    await store.getState().loadDemo();
+    expect(store.getState().review).toBeNull();
+    await store.getState().startFromProfile(profile);
+    store.getState().reset();
+    expect(store.getState().review).toBeNull();
   });
 
   it("reset clears memory and storage", async () => {

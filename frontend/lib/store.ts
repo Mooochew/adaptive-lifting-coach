@@ -14,7 +14,7 @@ import { createStore, type StoreApi } from "zustand/vanilla";
 import { useStore } from "zustand";
 import { api as defaultApi, ApiError, type ApiClient } from "./api";
 import { createLocalStore, emptyData, exportData, importData, type AppData, type DataStore } from "./storage";
-import type { ExerciseInfo, Metrics, Profile, Program, RulesResponse, SetLog } from "./types";
+import type { CoachReview, ExerciseInfo, Metrics, Profile, Program, RulesResponse, SetLog } from "./types";
 import { currentPosition, newId, newSetProblem, removeLog, upsertLog, withIds, type SessionRef } from "./workout";
 
 export type LoadStatus = "idle" | "loading" | "ready" | "error";
@@ -24,6 +24,8 @@ export interface AppState {
   profile: Profile | null;
   program: Program | null;
   logs: SetLog[];
+  /** The AI coach's review of the current program (null for the demo athlete or older data). */
+  review: CoachReview | null;
   /** Exercise library by id (names, kind, muscles), loaded once from the backend. */
   catalog: Record<string, ExerciseInfo>;
   /** Training rules (warm-up scheme, load steps, ...), loaded once from the backend. */
@@ -84,8 +86,8 @@ export function createAppStore({
 
   return createStore<AppState>()((set, get) => {
     const snapshot = (): AppData => {
-      const { profile, program, logs } = get();
-      return { ...emptyData(), profile, program, logs };
+      const { profile, program, logs, review } = get();
+      return { ...emptyData(), profile, program, logs, review };
     };
     const persist = () => {
       const ok = storage.save(snapshot());
@@ -101,12 +103,13 @@ export function createAppStore({
     };
 
     /** Replace all lifter data at once (demo, new program, import). */
-    const replaceData = (data: Pick<AppData, "profile" | "program" | "logs">) => {
+    const replaceData = (data: Pick<AppData, "profile" | "program" | "logs" | "review">) => {
       const logs = withIds(data.logs);
       set({
         profile: data.profile,
         program: data.program,
         logs,
+        review: data.review ?? null,
         metrics: null,
         metricsStatus: "idle",
         metricsError: null,
@@ -122,6 +125,7 @@ export function createAppStore({
       profile: null,
       program: null,
       logs: [],
+      review: null,
       catalog: {},
       rules: null,
       metrics: null,
@@ -160,7 +164,7 @@ export function createAppStore({
         set({ busy: "demo", error: null });
         try {
           const demo = await api.demo();
-          replaceData({ profile: demo.profile, program: demo.program, logs: demo.logs });
+          replaceData({ profile: demo.profile, program: demo.program, logs: demo.logs, review: null });
           set({ volumeShortfalls: [] });
           await get().refreshMetrics();
         } catch (err) {
@@ -170,13 +174,15 @@ export function createAppStore({
         }
       },
 
-      /** New block from a profile. Earlier blocks' logs are kept as history. */
+      /** New block from a profile, reviewed by the AI coach. Earlier blocks' logs are kept as history. */
       async startFromProfile(profile) {
         set({ busy: "template", error: null });
         try {
           const block = (get().program?.block ?? 0) + 1;
-          const { program, volume_shortfalls } = await api.template(profile, block);
-          replaceData({ profile, program, logs: get().logs });
+          const res = await api.review(profile, block);
+          const { program, volume_shortfalls } = res;
+          const review = { source: res.source, summary: res.summary, edits: res.edits, fallbackReason: res.fallback_reason };
+          replaceData({ profile, program, logs: get().logs, review });
           set({ volumeShortfalls: volume_shortfalls });
           await get().refreshMetrics();
         } catch (err) {
@@ -189,7 +195,7 @@ export function createAppStore({
       reset() {
         if (debounceTimer) clearTimeout(debounceTimer);
         inflight?.abort();
-        replaceData({ profile: null, program: null, logs: [] });
+        replaceData({ profile: null, program: null, logs: [], review: null });
         storage.clear(); // replaceData persisted an empty snapshot; leave storage truly empty
         set({ volumeShortfalls: [], saveFailed: false, error: null, ignoredSets: null });
       },

@@ -27,6 +27,8 @@ def test_rules_listed():
     assert data["goals"]["strength"]["compound"]["load_step_pct"] == 0.0   # min step only
     assert data["shared"]["min_load_step"] == {"lb": 5.0, "kg": 2.5}
     assert data["goals"]["hypertrophy"]["volume"]["max"] == 20
+    assert data["goals"]["hypertrophy"]["volume"]["start_band"] == {"low": 6, "high": 14}
+    assert data["goals"]["strength"]["volume"]["start_band"] == {"low": 4, "high": 12}
     assert data["shared"]["rpe_tolerance"] == 0.5
 
 

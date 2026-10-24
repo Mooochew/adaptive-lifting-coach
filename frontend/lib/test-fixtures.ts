@@ -7,6 +7,7 @@ export const profile: Profile = {
   session_minutes: 60,
   equipment: ["barbell", "dumbbell"],
   injuries: "",
+  training_background: "",
   units: "lb",
   lift_estimates: [],
 };

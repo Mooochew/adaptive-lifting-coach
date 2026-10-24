@@ -3,9 +3,9 @@
 An AI strength coach that builds a 4-week training block, then adapts it every week based on what you actually lifted and how hard it felt (RPE), explaining every change.
 
 - **Frontend:** Next.js + TypeScript (`frontend/`)
-- **Backend:** Python FastAPI: training math, rules, and (soon) the LLM calls (`backend/`)
+- **Backend:** Python FastAPI: training math, rules, and the AI coach (`backend/`)
 
-> Work in progress. Prompt-engineering write-up and screenshots coming soon.
+> Work in progress. Start here: [docs/HANDOFF.md](docs/HANDOFF.md). How the AI is prompted, and why: [docs/prompt-log.md](docs/prompt-log.md). Plan: [docs/phase3-plan.md](docs/phase3-plan.md).
 
 ## Requirements
 
@@ -51,6 +51,32 @@ npm run dev                       # http://localhost:3000
 
 Open **http://localhost:3000**. The frontend talks to the backend at `http://localhost:8000` by default; to change that, copy `frontend/.env.example` to `frontend/.env.local` and edit it.
 
+## The AI coach (optional)
+
+The rules engine writes every program. If an AI model is configured, it then reviews the plan like a
+coach: a few small changes, each with a reason, around your injuries and training background. The
+engine checks every change against its limits and falls back to the standard plan if anything is off,
+so the app works the same without a key.
+
+1. Create an OpenAI API key and **set a monthly spend limit** in the OpenAI dashboard. A review typically costs a few cents; the worst case is bounded by the limits below (3 attempts of at most 8,000 output tokens, within 90 seconds).
+2. In `backend/.env` (copy `backend/.env.example`; never commit it):
+   ```
+   LLM_PROVIDER=openai
+   OPENAI_API_KEY=sk-...
+   ```
+   The model is `gpt-6.1-sol` by default (`LLM_MODEL`, `LLM_EFFORT`). Leave `LLM_PROVIDER` empty to turn the AI off.
+3. Restart the backend. "Build my program" now shows **Your coach's adjustments** above the board.
+
+Usage limits: 5 reviews per 10 minutes per IP address, 200 a day in total (resets at midnight UTC), and 4 at
+once (`AI_REVIEWS_PER_WINDOW`, `AI_REVIEW_WINDOW_S`, `AI_REVIEWS_PER_DAY`, `AI_MAX_CONCURRENT_REVIEWS`). Over
+a limit, or past the 90-second budget (`LLM_REVIEW_DEADLINE_S`), you get the standard plan. Behind a hosting
+proxy, set uvicorn's `FORWARDED_ALLOW_IPS` to the proxy's address so each visitor counts separately (never `*`).
+
+To measure the AI on fixed test lifters (costs cents; needs the key):
+```bash
+python scripts/run_eval.py          # from backend/, venv active; report in backend/evals/results/
+```
+
 ## Tests
 
 Backend (from `backend/`, venv active): training rules, progression, guards, templates, API
@@ -68,7 +94,7 @@ End-to-end smoke tests (from `frontend/`): the real app in a real browser agains
 npx playwright install chromium   # once
 npm run test:e2e
 ```
-These start their own backend (port 8100, needs `backend/.venv` set up) and frontend (port 3100), so you don't need either running, and they won't clash with dev servers you already have open. On a failure, `npx playwright show-report` shows a step-by-step trace. If something is already listening on 3100 or 8100, the tests reuse it instead of starting fresh, so stop leftover servers if results look odd.
+These start their own backend (port 8100, needs `backend/.venv` set up, with a scripted AI coach so no key is used) and frontend (port 3100), so you don't need either running, and they won't clash with dev servers you already have open. On a failure, `npx playwright show-report` shows a step-by-step trace. If something is already listening on 3100 or 8100, the tests reuse it instead of starting fresh, so stop leftover servers if results look odd.
 
 ## Troubleshooting
 

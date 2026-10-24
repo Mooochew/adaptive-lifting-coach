@@ -57,6 +57,7 @@ class VolumeRules(_Frozen):
     start: Range                     # weekly hard sets per muscle at the start of a block
     max: float                       # weekly ceiling per muscle
     ramp: Range                      # sets added per muscle per week when recovering well
+    start_band: Range                # week-1 weekly sets a coach (the AI review) may choose per muscle
 
 
 class DeloadRules(_Frozen):
@@ -127,8 +128,13 @@ HYPERTROPHY_ISOLATION = ExerciseRules(
 
 # ---------- Volume and deload rules ----------
 
-STRENGTH_VOLUME = VolumeRules(start=Range(low=6, high=10), max=15, ramp=Range(low=0, high=1))
-HYPERTROPHY_VOLUME = VolumeRules(start=Range(low=10, high=12), max=20, ramp=Range(low=1, high=2))
+# start_band: below ~4-6 weekly hard sets growth reliably drops off; the top keeps week 1 well under
+# the max so there's room to ramp. Experience alone doesn't decide where in the band a lifter belongs
+# (some experienced lifters do better on less), so the AI review chooses, with a reason.
+STRENGTH_VOLUME = VolumeRules(start=Range(low=6, high=10), max=15, ramp=Range(low=0, high=1),
+                              start_band=Range(low=4, high=12))
+HYPERTROPHY_VOLUME = VolumeRules(start=Range(low=10, high=12), max=20, ramp=Range(low=1, high=2),
+                                 start_band=Range(low=6, high=14))
 
 STRENGTH_DELOAD = DeloadRules(set_cut=0.4, load_cut=0.10, rir_add=2)
 HYPERTROPHY_DELOAD = DeloadRules(set_cut=0.5, load_cut=0.0, rir_add=3)  # keep load, cut sets + effort

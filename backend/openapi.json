@@ -48,6 +48,48 @@
         }
       }
     },
+    "/program/review": {
+      "post": {
+        "tags": [
+          "program"
+        ],
+        "summary": "Program Review",
+        "description": "The standard plan, reviewed by the AI coach: a few bounded edits with reasons.\n\nAlways returns a valid program: the standard plan when the AI is off, over the usage\nlimits, unavailable, or can't produce edits that pass the checks (`source: \"baseline\"`,\nwith a `fallback_reason`). 422 with a readable `detail` when the profile can't be built.",
+        "operationId": "program_review_program_review_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemplateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/program/template": {
       "post": {
         "tags": [
@@ -256,6 +298,78 @@
           "notes"
         ],
         "title": "AdvanceResponse"
+      },
+      "AppliedEdit": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "swap",
+              "sets",
+              "reps",
+              "effort",
+              "remove",
+              "volume"
+            ],
+            "title": "Kind"
+          },
+          "day": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Day"
+          },
+          "slot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slot Id"
+          },
+          "muscle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Muscle"
+          },
+          "change": {
+            "type": "string",
+            "title": "Change"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "for_injury": {
+            "type": "boolean",
+            "title": "For Injury"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "day",
+          "slot_id",
+          "muscle",
+          "change",
+          "reason",
+          "for_injury"
+        ],
+        "title": "AppliedEdit"
       },
       "DeloadRules": {
         "properties": {
@@ -1080,6 +1194,13 @@
             "title": "Injuries",
             "default": ""
           },
+          "training_background": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "Training Background",
+            "description": "Optional free text, e.g. years lifting and what has or hasn't worked; read by the AI review",
+            "default": ""
+          },
           "units": {
             "type": "string",
             "enum": [
@@ -1169,6 +1290,72 @@
           "high"
         ],
         "title": "Range"
+      },
+      "ReviewResponse": {
+        "properties": {
+          "program": {
+            "$ref": "#/components/schemas/Program"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Notes"
+          },
+          "volume_shortfalls": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Volume Shortfalls"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "ai",
+              "baseline"
+            ],
+            "title": "Source"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary",
+            "description": "The AI coach's summary; empty for the standard plan"
+          },
+          "edits": {
+            "items": {
+              "$ref": "#/components/schemas/AppliedEdit"
+            },
+            "type": "array",
+            "title": "Edits",
+            "description": "Edits applied to the standard plan, each with the AI's reason"
+          },
+          "fallback_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback Reason",
+            "description": "Why the standard plan was used instead (safe to show)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "program",
+          "notes",
+          "volume_shortfalls",
+          "source",
+          "summary",
+          "edits",
+          "fallback_reason"
+        ],
+        "title": "ReviewResponse",
+        "description": "What POST /program/review returns: /program/template's fields plus the review."
       },
       "RulesResponse": {
         "properties": {
@@ -1645,13 +1832,17 @@
           },
           "ramp": {
             "$ref": "#/components/schemas/Range"
+          },
+          "start_band": {
+            "$ref": "#/components/schemas/Range"
           }
         },
         "type": "object",
         "required": [
           "start",
           "max",
-          "ramp"
+          "ramp",
+          "start_band"
         ],
         "title": "VolumeRules"
       },

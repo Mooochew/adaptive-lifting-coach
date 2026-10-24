@@ -24,6 +24,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/program/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Program Review
+         * @description The standard plan, reviewed by the AI coach: a few bounded edits with reasons.
+         *
+         *     Always returns a valid program: the standard plan when the AI is off, over the usage
+         *     limits, unavailable, or can't produce edits that pass the checks (`source: "baseline"`,
+         *     with a `fallback_reason`). 422 with a readable `detail` when the profile can't be built.
+         */
+        post: operations["program_review_program_review_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/program/template": {
         parameters: {
             query?: never;
@@ -165,6 +189,26 @@ export interface components {
              * @description Guard notes from checking the updated weeks
              */
             notes: string[];
+        };
+        /** AppliedEdit */
+        AppliedEdit: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "swap" | "sets" | "reps" | "effort" | "remove" | "volume";
+            /** Day */
+            day: number | null;
+            /** Slot Id */
+            slot_id: string | null;
+            /** Muscle */
+            muscle: string | null;
+            /** Change */
+            change: string;
+            /** Reason */
+            reason: string;
+            /** For Injury */
+            for_injury: boolean;
         };
         /** DeloadRules */
         DeloadRules: {
@@ -493,6 +537,12 @@ export interface components {
              */
             injuries: string;
             /**
+             * Training Background
+             * @description Optional free text, e.g. years lifting and what has or hasn't worked; read by the AI review
+             * @default
+             */
+            training_background: string;
+            /**
              * Units
              * @default lb
              * @enum {string}
@@ -533,6 +583,37 @@ export interface components {
             low: number;
             /** High */
             high: number;
+        };
+        /**
+         * ReviewResponse
+         * @description What POST /program/review returns: /program/template's fields plus the review.
+         */
+        ReviewResponse: {
+            program: components["schemas"]["Program"];
+            /** Notes */
+            notes: string[];
+            /** Volume Shortfalls */
+            volume_shortfalls: string[];
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "baseline";
+            /**
+             * Summary
+             * @description The AI coach's summary; empty for the standard plan
+             */
+            summary: string;
+            /**
+             * Edits
+             * @description Edits applied to the standard plan, each with the AI's reason
+             */
+            edits: components["schemas"]["AppliedEdit"][];
+            /**
+             * Fallback Reason
+             * @description Why the standard plan was used instead (safe to show)
+             */
+            fallback_reason: string | null;
         };
         /** RulesResponse */
         RulesResponse: {
@@ -731,6 +812,7 @@ export interface components {
             /** Max */
             max: number;
             ramp: components["schemas"]["Range"];
+            start_band: components["schemas"]["Range"];
         };
         /** WarmupStep */
         WarmupStep: {
@@ -801,6 +883,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Metrics"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    program_review_program_review_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TemplateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewResponse"];
                 };
             };
             /** @description Validation Error */

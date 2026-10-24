@@ -4,7 +4,7 @@
  * Today: browser localStorage. Later (Supabase): implement `DataStore` against the
  * database and swap it in where the store is created; nothing else changes.
  */
-import type { Profile, Program, SetLog } from "./types";
+import type { CoachReview, Profile, Program, SetLog } from "./types";
 import { validateSetLog } from "./workout";
 
 export const STORAGE_KEY = "alc:data";
@@ -16,7 +16,21 @@ export interface AppData {
   profile: Profile | null;
   program: Program | null;
   logs: SetLog[];
+  /** The AI coach's review of `program`. Optional so data saved before reviews existed still loads. */
+  review?: CoachReview | null;
   savedAt: string;
+}
+
+/** A stored review if it has the right shape, else null: it's display-only, so never block loading on it. */
+function parseReview(raw: unknown): CoachReview | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const r = raw as Record<string, unknown>;
+  const ok = (r.source === "ai" || r.source === "baseline") && typeof r.summary === "string"
+    && (r.fallbackReason === null || typeof r.fallbackReason === "string") && Array.isArray(r.edits)
+    && r.edits.every((e) => typeof e === "object" && e !== null
+      && typeof (e as Record<string, unknown>).change === "string"
+      && typeof (e as Record<string, unknown>).reason === "string");
+  return ok ? (raw as CoachReview) : null;
 }
 
 export interface DataStore {
@@ -62,6 +76,7 @@ export function parseData(raw: unknown): AppData {
     profile: (d.profile as Profile | null) ?? null,
     program: (d.program as Program | null) ?? null,
     logs: d.logs as SetLog[],
+    review: parseReview(d.review),
     savedAt: typeof d.savedAt === "string" ? d.savedAt : new Date().toISOString(),
   };
 }

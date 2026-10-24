@@ -5,3 +5,4 @@ pydantic-settings==2.16.0
 python-dotenv==1.2.4
 pytest==9.1.1
 httpx2==2.13.1
+openai==3.36.0

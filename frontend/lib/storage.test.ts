@@ -71,6 +71,22 @@ describe("export / import", () => {
     expect(back.logs).toHaveLength(3);
   });
 
+  it("keeps the coach's review, and loads files from before reviews existed", () => {
+    const review = { source: "ai" as const, summary: "Hi", fallbackReason: null,
+                     edits: [{ kind: "sets" as const, day: 1, slot_id: "bench", muscle: null, for_injury: false,
+                               change: "Bench: 3 → 2 sets", reason: "Why" }] };
+    expect(importData(exportData({ ...sample(), review })).review).toEqual(review);
+    const old: Record<string, unknown> = { ...sample() };
+    delete old.review;
+    expect(importData(JSON.stringify(old)).review).toBeNull();
+    expect(importData(JSON.stringify({ ...sample(), review: { source: 7 } })).review).toBeNull();   // ignore junk
+    for (const broken of [{ ...review, source: "robot" }, { ...review, summary: 3 }, { ...review, fallbackReason: 1 },
+                          { ...review, edits: "x" }, { ...review, edits: [{ change: "a" }] },
+                          { ...review, edits: [{ reason: "b" }] }, { ...review, edits: [null] }]) {
+      expect(importData(JSON.stringify({ ...sample(), review: broken })).review).toBeNull();
+    }
+  });
+
   it.each([
     ["not json", "That file isn't valid JSON."],
     [JSON.stringify([1, 2]), "Unsupported data version"],
