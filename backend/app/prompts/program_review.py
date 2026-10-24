@@ -1,4 +1,4 @@
-"""Prompt for the AI program review (v3). See docs/prompt-log.md for the history and eval results.
+"""Prompt for the AI program review (v4). See docs/prompt-log.md for the history and eval results.
 
 Prompt-engineering patterns used here:
   Persona              a conservative, evidence-based coach reviewing another coach's plan
@@ -28,7 +28,7 @@ from app.review import (
 from app.rules import GOALS, VOLUME_TARGET_MUSCLES, rules_for_exercise, target_rpe_range
 from app.schemas import Profile, Week
 
-PROMPT_VERSION = "v3"
+PROMPT_VERSION = "v4"
 
 
 def _library() -> str:
@@ -65,7 +65,9 @@ Edit kinds (fields not used by a kind must be null):
 - volume: set a muscle's weekly hard sets for week 1 (muscle, weekly_sets). The engine decides which exercises \
 get the sets, within the session time. Each muscle's current number is listed after week 1 with the lowest \
 number the engine accepts for it in this schedule (main lifts keep some muscles above the band's bottom); never go \
-below that lowest number. "can't change" means no volume edit for that muscle fits this schedule. The week lands \
+below that lowest number. "can't change" means no volume edit for that muscle fits this schedule. The lowest \
+numbers hold for one muscle at a time: muscles that share exercises (rows train upper back and lats; presses train \
+chest and triceps) pull each other down, so lower only one of a pair unless you lower both by little. The week lands \
 within a set of your number. Allowed per goal:
 {_bands()}
   Muscles with a volume target: {", ".join(VOLUME_TARGET_MUSCLES)}.

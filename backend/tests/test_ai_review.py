@@ -135,12 +135,13 @@ class TestPrompt:
         for muscle, floor in volume_floors(first, p).items():
             assert f"{muscle} " in user and f"(lowest {floor})" in user
         assert "lowest" in prompt.SYSTEM_PROMPT and "never go below" in prompt.SYSTEM_PROMPT
+        assert "one muscle at a time" in prompt.SYSTEM_PROMPT and "share exercises" in prompt.SYSTEM_PROMPT
 
     def test_system_prompt_prefers_a_swap_that_keeps_the_movement(self):
         s = prompt.SYSTEM_PROMPT
         assert "Prefer a swap that keeps the movement pattern" in s
         assert "Remove only when no listed option avoids the painful movement" in s
-        assert prompt.PROMPT_VERSION == "v3"
+        assert prompt.PROMPT_VERSION == "v4"
 
 
 class TestTimeBudget:

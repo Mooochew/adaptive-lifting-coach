@@ -67,6 +67,18 @@ class TestSwap:
             lifter(injuries=SHOULDER))
         assert outcome.violations == [] and slot(outcome.program, 1, 1, "bench").exercise_id == "dip"
 
+    @pytest.mark.parametrize("slot_id, new", [("deadlift", "hip_thrust"), ("deadlift", "cable_pull_through"),
+                                              ("rdl", "hip_thrust")])
+    def test_a_sore_lower_back_can_swap_hinges_for_back_friendly_hip_work(self, slot_id, new):
+        p = Profile(goal="hypertrophy", experience="intermediate", days_per_week=4, session_minutes=75,
+                    equipment=FULL_GYM, injuries="lower back flares up with heavy deadlifts")
+        day = next(s.day for s in build_week_one(p)[0].sessions for e in s.exercises if e.slot_id == slot_id)
+        swap = edit("swap", day=day, slot_id=slot_id, new_exercise_id=new, for_injury=True,
+                    reason="Hip work without loading your lower back.")
+        outcome = review_program(review(swap), p)
+        assert outcome.violations == []
+        assert any(e.exercise_id == new for s in outcome.program.weeks[0].sessions for e in s.exercises)
+
     def test_injury_swap_must_still_train_the_same_muscle(self):
         outcome = review_program(
             review(edit("swap", day=1, slot_id="bench", new_exercise_id="leg_curl", for_injury=True)),
@@ -192,6 +204,16 @@ class TestVolume:
             outcome = review_program(review(edit("volume", muscle="quads", weekly_sets=sets)), p)
             assert outcome.violations == [], sets
             assert abs(weekly_muscle_sets(outcome.program.weeks[0])["quads"] - sets) < 1
+
+    def test_lowering_two_muscles_that_share_exercises_names_the_clash(self):
+        # Rows train upper back and lats: lowering upper back cuts rows, which takes lats under its number,
+        # and lats can't be refilled without taking upper back back over. The AI needs to know why.
+        p = Profile(goal="hypertrophy", experience="advanced", days_per_week=6, session_minutes=75,
+                    equipment=["barbell", "dumbbell", "machine", "cable"])
+        both = review(edit("volume", muscle="upper_back", weekly_sets=7), edit("volume", muscle="lats", weekly_sets=6))
+        says = problems(review_program(both, p))
+        assert "lats" in says and "upper_back is lowered too" in says and "barbell_row" in says
+        assert review_program(review(edit("volume", muscle="lats", weekly_sets=6)), p).violations == []
 
     def test_lowest_volume_leaves_week_one_untouched(self):
         p = lifter()

@@ -23,7 +23,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from app.exercises import EXERCISES, ExerciseInfo, Muscle, get_exercise
+from app.exercises import EXERCISES, ExerciseInfo, Muscle, get_exercise, muscle_credits
 from app.guards import weekly_muscle_sets
 from app.rules import VOLUME_TARGET_MUSCLES, goal_rules, rules_for_exercise, target_rpe_range
 from app.schemas import Model, Profile, Program, Session, Week
@@ -302,6 +302,7 @@ def _apply(review: ProgramReview, first: Week, profile: Profile
     overrides: dict[str, float] = {}
     excluded: dict[int, set[str]] = {}
     baseline_sets = weekly_muscle_sets(first)
+    baseline_ids = sorted({ex.exercise_id for s in first.sessions for ex in s.exercises})
 
     for e in review.edits:
         if e.kind == "volume":
@@ -325,15 +326,19 @@ def _apply(review: ProgramReview, first: Week, profile: Profile
     # can't push it back over with their secondary work.
     volume = goal_rules(profile.goal).volume
     caps = {m: t for m, t in overrides.items() if t < baseline_sets.get(m, 0.0)}
+    # Muscles the coach didn't set keep under the band's top (or where they already were): a swap
+    # that loses secondary work gets refilled, and the refill mustn't overshoot a shared muscle.
+    fill_caps = {**{m: max(volume.start_band.high, baseline_sets.get(m, 0.0))
+                    for m in VOLUME_TARGET_MUSCLES if m not in overrides}, **caps}
     problems: list[str] = []
     shortfalls = fill_volume(first, profile, volume.start.low, overrides=overrides, frozen=frozen,
-                             excluded=excluded, caps=caps)
+                             excluded=excluded, caps=fill_caps)
     for _ in range(4):
         for m, t in overrides.items():
             if weekly_muscle_sets(first).get(m, 0.0) > t:
                 reduce_volume(first, m, t, frozen)
         shortfalls = fill_volume(first, profile, volume.start.low, overrides=overrides, frozen=frozen,
-                                 excluded=excluded, caps=caps)
+                                 excluded=excluded, caps=fill_caps)
         if all(weekly_muscle_sets(first).get(m, 0.0) <= t for m, t in overrides.items()):
             break
     # Secondary work comes in half sets, so a muscle may land within a set of its number, but
@@ -341,6 +346,16 @@ def _apply(review: ProgramReview, first: Week, profile: Profile
     after = weekly_muscle_sets(first)
     for muscle, target in overrides.items():
         if after.get(muscle, 0.0) <= target - 1 or after.get(muscle, 0.0) < volume.start_band.low:
+            # Usually another lowered muscle took this one down with it through shared exercises
+            # (rows train upper back and lats), and the floors in the prompt are one muscle at a time.
+            clash = next(((other, shared) for other in caps if other != muscle
+                          for shared in [[x for x in baseline_ids if {muscle, other} <= muscle_credits(x).keys()]]
+                          if shared), None)
+            if clash:
+                problems.append(f"{muscle}: can't fit {target:g} weekly sets (got {after.get(muscle, 0.0):g}) while "
+                                f"{clash[0]} is lowered too: they share {', '.join(clash[1])}. Lower only one of "
+                                "them, or both by less.")
+                continue
             problems.append(f"{muscle}: can't fit {target:g} weekly sets in this schedule "
                             f"(got {after.get(muscle, 0.0):g}); choose a lower number.")
         elif after.get(muscle, 0.0) >= target + 1 or after.get(muscle, 0.0) > volume.start_band.high:

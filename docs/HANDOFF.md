@@ -1,6 +1,6 @@
 # Handoff
 
-Read this first if you're picking up the project (human or AI agent). Last updated 2026-10-22.
+Read this first if you're picking up the project (human or AI agent). Last updated 2026-10-24.
 
 ## What this is
 
@@ -29,8 +29,8 @@ Deliverables: the GitHub repo (public: `Mooochew/adaptive-lifting-coach`), a dem
 | 1 | Rules engine | Done |
 | 2 | Templates, UI, data layer, Block Board, Playwright smoke tests | Done |
 | 3.1 | Guard hardening, input limits, retry loop | Done (`0f5a421` on `main`) |
-| **3.2** | **AI program review** | **Built and reviewed on branch `phase3-step2-ai-program-review` (last code commit `3a21d20`). Pushed; PR open, not merged** |
-| 3.3 | AI coach notes in the Progress panel | Next |
+| 3.2 | AI program review | Done (PR #1, prompt v4, live eval run) |
+| **3.3** | **AI coach notes in the Progress panel** | **Next** |
 | 3.4 | Demo mode (recorded AI replies) and the prompt-log write-up | Later |
 | 3.5 | README, screenshots, video script | Later |
 
@@ -58,7 +58,7 @@ The full plan is in `docs/phase3-plan.md`, and the prompt history in `docs/promp
 Where the pieces live:
 - `POST /program/review` is in `app/routes/program.py`. The model sits behind an adapter in
   `app/llm/` (OpenAI plus a scripted `FakeLLM`).
-- The prompt is `app/prompts/program_review.py`, currently v2.
+- The prompt is `app/prompts/program_review.py`, currently v4. Each muscle's volume is shown with the lowest number the engine accepts (`volume_floors()` in `review.py`).
 - The service is `app/ai_review.py`, with a 90-second total budget and at most 4 concurrent
   reviews.
 - Rate limits are in `app/rate_limit.py`: 5 per 10 minutes per IP and 200 a day.
@@ -72,20 +72,17 @@ new adapter and changing two `.env` lines.
 
 ## Next steps, in order
 
-1. **Merge the step 3.2 PR** once the owner OKs it (`gh pr merge --squash --delete-branch`).
-2. **First live run.** The real OpenAI path has never been called; only stubbed tests exist.
-   The owner needs to:
-   - create an OpenAI key and set a monthly spend limit
-   - put `LLM_PROVIDER=openai` and `OPENAI_API_KEY=...` in `backend/.env`
-   - run `python scripts/run_eval.py` (10 eval lifters, about a dollar at most)
-   - record the results in `docs/prompt-log.md` (v2 shows "pending")
+The live OpenAI path works (first run 2026-10-23). Prompt v4 scored 29/30 first try, 0/30
+fallbacks, about $0.004 per review; see `docs/prompt-log.md` for v2 → v4.
 
-   If the model id or the structured-output call fails, fix the adapter first.
-3. **Step 3.3: AI coach notes.** Weekly plain-language explanations in the Progress panel's
-   "Coach notes" placeholder. The numbers come from `/metrics`, never from the model.
-4. **Step 3.4: demo mode.** `DEMO_MODE` exists in config but is unused. Serve recorded AI
-   replies so the live demo works offline.
-5. **Step 3.5:** README polish, screenshots, the video script, and the presentation.
+1. **Step 3.3: AI coach notes.** Weekly plain-language explanations in the Progress panel's
+   "Coach notes" placeholder. The numbers come from `/metrics`, never from the model. This is
+   what makes the AI visible beyond onboarding in the demo.
+2. **Step 3.4: demo mode.** `DEMO_MODE` exists in config but is unused. Serve recorded AI
+   replies so the live demo works offline. Also the "blinded side-by-side page" the plan
+   promised for the eval script (never built) and the prompt-log write-up.
+3. **Step 3.5:** README polish (it still says "Work in progress", and its pitch should match
+   what the AI actually does), screenshots, the video script, and the presentation.
 
 ### Known open items (deliberately deferred)
 
@@ -137,13 +134,17 @@ The README has full setup. In short:
 |---|---|---|
 | Backend | `cd backend; .venv/Scripts/activate; uvicorn app.main:app --reload` | `backend/.env` from `.env.example`; the AI is off unless `LLM_PROVIDER=openai` and a key are set |
 | Frontend | `cd frontend; npm ci; npm run dev` | localhost only |
-| Backend tests | `pytest` (in `backend/`) | 590 tests |
+| Backend tests | `pytest` (in `backend/`) | 605 tests |
 | Frontend tests | `npm test`, `npm run typecheck`, `npm run lint` | 82 unit tests |
 | End-to-end | `npm run test:e2e` | Starts its own servers on 8100/3100 with the scripted AI (no key, no cost); 8 tests |
 | AI eval | `python scripts/run_eval.py [--fake]` | Real model needs the key; reports go to `backend/evals/results/` (gitignored) |
 | API types | `python scripts/export_openapi.py`, then `npm run gen:types` | After any backend model change; a test fails if they're stale |
 
 ## Gotchas
+
+- **Environment variables beat `backend/.env`:** a stale `OPENAI_API_KEY` set in Windows once made
+  OpenAI return 401 although `.env` was right. An HTTP 429 with `insufficient_quota` means the
+  account is out of credits, not rate limited; the backend log now says which.
 
 - **Windows paths:** the development machine runs Windows. In Git Bash use `/c/Users/...` paths,
   but Windows Python needs `C:/...` paths for files.

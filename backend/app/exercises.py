@@ -71,6 +71,9 @@ EXERCISES: tuple[ExerciseInfo, ...] = (
     E("dip", "Parallel Bar Dip", "bodyweight", "compound", ("chest", "triceps"), ("front_delts",)),
     E("push_up", "Push-Up", "bodyweight", "compound", ("chest",), ("triceps", "front_delts")),
     E("kb_swing", "Kettlebell Swing", "kettlebell", "compound", ("glutes", "hamstrings"), ("lower_back",)),
+    # Hip work that keeps load off the lower back: options for an injury swap, not in any template
+    E("hip_thrust", "Barbell Hip Thrust", "barbell", "compound", ("glutes",), ("hamstrings",)),
+    E("cable_pull_through", "Cable Pull-Through", "cable", "compound", ("glutes", "hamstrings")),
     # Isolation
     E("lateral_raise", "Dumbbell Lateral Raise", "dumbbell", "isolation", ("side_delts",)),
     E("face_pull", "Cable Face Pull", "cable", "isolation", ("rear_delts",), ("upper_back",)),
