@@ -79,3 +79,35 @@ def test_address_needs_every_copy_of_the_exercise():
         "weekly_sets": None, "for_injury": True, "reason": "Easier on the knee."}]}
     result = run(FakeLLM(one), [knee])[0]["checks"]["addresses back_squat"]
     assert result is (len(squat_slots) == 1)
+
+
+def test_notes_eval_runs_every_scenario_with_the_scripted_model(tmp_path):
+    from scripts.run_notes_eval import main as notes_main
+    path = notes_main(["--fake", "--out", str(tmp_path)])
+    rows = json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))
+    assert [r["case"] for r in rows] == ["good-week", "check-in", "hard-week", "injury-and-injection"]
+    assert all(r["source"] == "ai" and r["first_try"] for r in rows)
+    assert "Grounded on the first try: **4/4**" in path.read_text(encoding="utf-8")
+
+
+def test_blinded_comparison_page_hides_which_plan_is_the_ai(tmp_path):
+    swap = {"summary": "Shoulder-friendly press.", "edits": [{
+        "kind": "swap", "day": 3, "slot_id": "ohp", "new_exercise_id": "db_shoulder_press", "muscle": None,
+        "sets_change": None, "reps": None, "reps_max": None, "target_rpe": None, "weekly_sets": None,
+        "for_injury": True, "reason": "Overhead pressing hurts your shoulder."}]}
+    shoulder = next(c for c in cases() if c["id"] == "shoulder-overhead")
+    rows = run(FakeLLM(swap), [shoulder])
+    from scripts.run_eval import compare_page
+    page = compare_page(rows, seed=1)
+    a, b = page.index("Plan A"), page.index("Plan B")
+    key = page.index("<details")
+    assert a < b < key and "Seated Dumbbell Shoulder Press" in page and "Standing Overhead Press" in page
+    before_key = page[:key]
+    assert "AI" not in before_key.replace("AI review: blinded", "")      # nothing gives it away above the key
+    assert "AI-reviewed" in page[key:] and "standard" in page[key:]
+    assert compare_page(rows, seed=1) == page                              # reproducible
+
+
+def test_eval_writes_the_comparison_page(tmp_path):
+    path = main(["--fake", "--cases", "shoulder-overhead", "--out", str(tmp_path)])
+    assert path.with_name(path.stem + "-compare.html").exists()

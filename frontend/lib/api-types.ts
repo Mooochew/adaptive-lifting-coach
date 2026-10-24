@@ -112,6 +112,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/coach/notes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Coach Notes
+         * @description A short AI note about the latest logged week, grounded in the engine's numbers.
+         *
+         *     `source: "none"` with a `reason` (safe to show) when nothing is logged, the AI is off, busy,
+         *     over the usage limits, unavailable, or couldn't write a note that matches the numbers.
+         */
+        post: operations["coach_notes_coach_notes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -209,6 +232,63 @@ export interface components {
             reason: string;
             /** For Injury */
             for_injury: boolean;
+        };
+        /** CoachNotesRequest */
+        CoachNotesRequest: {
+            profile: components["schemas"]["Profile"];
+            program: components["schemas"]["Program"];
+            /** Logs */
+            logs: components["schemas"]["SetLog"][];
+            /**
+             * Changes
+             * @description The plan changes from the last time a week ended (from /program/advance)
+             * @default []
+             */
+            changes: string[];
+            /**
+             * Week
+             * @description The week to write about (the one that just ended); default: the latest logged
+             */
+            week?: number | null;
+        };
+        /** CoachNotesResponse */
+        CoachNotesResponse: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "ai" | "none";
+            /**
+             * Week
+             * @description The training week the note is about
+             */
+            week: number | null;
+            /**
+             * In Progress
+             * @description True when that week isn't finished yet
+             */
+            in_progress: boolean;
+            /** Headline */
+            headline: string;
+            /** Points */
+            points: components["schemas"]["NotePointOut"][];
+            /** Focus */
+            focus: string;
+            /**
+             * Reason
+             * @description Why there's no note (safe to show); null when source is 'ai'
+             */
+            reason: string | null;
+            /**
+             * Retryable
+             * @description True when asking again later may give a note (busy, limits, outage)
+             */
+            retryable: boolean;
+            /**
+             * Attempts
+             * @description Model calls that returned something
+             */
+            attempts: number;
         };
         /** DeloadRules */
         DeloadRules: {
@@ -473,6 +553,18 @@ export interface components {
              * @enum {string}
              */
             status: "below" | "in_range" | "above" | "deload" | "no_target";
+        };
+        /** NotePointOut */
+        NotePointOut: {
+            /** Subject */
+            subject: string;
+            /**
+             * Label
+             * @description Display name of the subject, e.g. 'Barbell Bench Press' or 'Chest'
+             */
+            label: string;
+            /** Text */
+            text: string;
         };
         /** PrescribedExercise */
         PrescribedExercise: {
@@ -1011,6 +1103,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DemoAthlete"];
+                };
+            };
+        };
+    };
+    coach_notes_coach_notes_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CoachNotesRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CoachNotesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

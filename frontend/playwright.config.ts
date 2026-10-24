@@ -32,7 +32,8 @@ export default defineConfig({
       cwd: backendDir,
       url: `${API_URL}/health`,
       // fake = scripted AI coach: e2e runs need no API key and cost nothing
-      env: { FRONTEND_ORIGIN: FRONTEND_URL, LLM_PROVIDER: "fake" },
+      // every test shares this backend, so its AI usage limits are lifted
+      env: { FRONTEND_ORIGIN: FRONTEND_URL, LLM_PROVIDER: "fake", AI_REVIEWS_PER_WINDOW: "1000" },
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
     },

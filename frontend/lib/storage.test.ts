@@ -87,6 +87,18 @@ describe("export / import", () => {
     }
   });
 
+  it("keeps the coach's notes, and loads files from before notes existed", () => {
+    const coachNotes = { source: "ai" as const, week: 2, in_progress: false, headline: "Good week.", focus: "Keep going.",
+                         points: [{ subject: "bench_press", label: "Barbell Bench Press", text: "Up a rep." }],
+                         reason: null, retryable: false, attempts: 1, block: 1, adjustedThrough: 2 };
+    expect(importData(exportData({ ...sample(), coachNotes })).coachNotes).toEqual(coachNotes);
+    expect(importData(JSON.stringify(sample())).coachNotes).toBeNull();
+    for (const broken of [{ ...coachNotes, source: "robot" }, { ...coachNotes, headline: 3 }, { ...coachNotes, block: "1" },
+                          { ...coachNotes, points: [{ subject: "x", text: "y" }] }, { ...coachNotes, reason: 4 }]) {
+      expect(importData(JSON.stringify({ ...sample(), coachNotes: broken })).coachNotes).toBeNull();
+    }
+  });
+
   it.each([
     ["not json", "That file isn't valid JSON."],
     [JSON.stringify([1, 2]), "Unsupported data version"],

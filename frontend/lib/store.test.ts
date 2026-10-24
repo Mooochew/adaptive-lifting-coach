@@ -3,7 +3,7 @@ import { ApiError, type ApiClient } from "./api";
 import type { AppData, DataStore } from "./storage";
 import { createAppStore } from "./store";
 import { benchSets, emptyMetrics, makeProgram, profile, program } from "./test-fixtures";
-import type { MetricsRequest, Profile } from "./types";
+import type { CoachNotesRequest, MetricsRequest, Profile } from "./types";
 
 function memoryStorage(failSaves = false): DataStore & { saved: AppData | null } {
   const s = {
@@ -23,6 +23,7 @@ function fakeApi(overrides: Partial<ApiClient> = {}) {
   const metricsCalls: MetricsRequest[] = [];
   const templateCalls: number[] = [];
   const reviewCalls: { profile: Profile; block: number }[] = [];
+  const notesCalls: CoachNotesRequest[] = [];
   const api: ApiClient = {
     health: async () => ({ ok: true, demo_mode: false }),
     rules: async () => { throw new Error("unused"); },
@@ -44,9 +45,15 @@ function fakeApi(overrides: Partial<ApiClient> = {}) {
       metricsCalls.push(req);
       return { ...emptyMetrics(), sessions_logged: req.logs.length };
     },
+    coachNotes: async (req) => {
+      notesCalls.push(req);
+      return { source: "ai", week: 1, in_progress: false, headline: "Bench is moving.", focus: "Hit 5 on every set.",
+               points: [{ subject: "bench_press", label: "Barbell Bench Press", text: "You held 185 lb." }],
+               reason: null, retryable: false, attempts: 1 };
+    },
     ...overrides,
   };
-  return { api, metricsCalls, templateCalls, reviewCalls };
+  return { api, metricsCalls, templateCalls, reviewCalls, notesCalls };
 }
 
 beforeEach(() => vi.useFakeTimers());
@@ -301,6 +308,193 @@ describe("app store", () => {
     store.getState().importJson(exported);
     expect(store.getState().logs).toHaveLength(3);
     expect(store.getState().error).toBeNull();
+  });
+
+  describe("coach notes", () => {
+    const weekEnded = () => {
+      const advanced = { ...makeProgram(), adjusted_through: 1 };
+      return { advance: async () => ({ program: advanced, changes: ["W2 D1 bench: 185 -> 190 lb"], notes: [] }) };
+    };
+
+    it("asks for notes once a week ends, with the plan changes, and saves them", async () => {
+      const storage = memoryStorage();
+      const { api, notesCalls } = fakeApi(weekEnded());
+      const store = createAppStore({ api, storage });
+      await store.getState().loadDemo();
+      await vi.runAllTimersAsync();
+      expect(notesCalls).toHaveLength(1);
+      expect(notesCalls[0].changes).toEqual(["W2 D1 bench: 185 -> 190 lb"]);
+      expect(notesCalls[0].week).toBe(1);                       // the week that just ended
+      expect(notesCalls[0].logs.every((l) => l.block === 1)).toBe(true);
+      expect(store.getState().coachNotes).toMatchObject({ headline: "Bench is moving.", block: 1, adjustedThrough: 1 });
+      expect(storage.saved?.coachNotes?.headline).toBe("Bench is moving.");
+
+      await store.getState().refreshMetrics();                  // same week: no new call
+      await vi.runAllTimersAsync();
+      expect(notesCalls).toHaveLength(1);
+    });
+
+    it("no notes before any week has ended, until asked", async () => {
+      const { api, notesCalls } = fakeApi();
+      const store = createAppStore({ api, storage: memoryStorage() });
+      await store.getState().loadDemo();
+      await vi.runAllTimersAsync();
+      expect(notesCalls).toHaveLength(0);
+      await store.getState().requestNotes();                    // the Refresh button
+      expect(notesCalls).toHaveLength(1);
+      expect(notesCalls[0].week).toBeUndefined();               // Refresh: the latest logged week
+      expect(store.getState().notesStatus).toBe("ready");
+    });
+
+    it("a failed request doesn't retry on every refresh, but Refresh retries", async () => {
+      let fail = true;
+      const { api, notesCalls } = fakeApi({
+        ...weekEnded(),
+        coachNotes: async (req) => {
+          notesCalls.push(req);
+          if (fail) throw new ApiError("network", "Can't reach the backend.");
+          return { source: "ai", week: 1, in_progress: false, headline: "Back on track.", focus: "Keep going.",
+                   points: [], reason: null, retryable: false, attempts: 1 };
+        },
+      });
+      const store = createAppStore({ api, storage: memoryStorage() });
+      await store.getState().loadDemo();
+      await vi.runAllTimersAsync();
+      expect(store.getState().notesStatus).toBe("error");
+      expect(store.getState().notesError).toBe("Can't reach the backend.");
+      await store.getState().refreshMetrics();
+      await vi.runAllTimersAsync();
+      expect(notesCalls).toHaveLength(1);
+      fail = false;
+      await store.getState().requestNotes();
+      expect(store.getState().coachNotes?.headline).toBe("Back on track.");
+    });
+
+    it("a refresh that gets no note (e.g. over the limit) keeps the note already there", async () => {
+      let limited = false;
+      const { api } = fakeApi({
+        ...weekEnded(),
+        coachNotes: async () => limited
+          ? { source: "none", week: null, in_progress: false, headline: "", points: [], focus: "",
+              reason: "You've reached the limit of coach notes for now.", retryable: true, attempts: 0 }
+          : { source: "ai", week: 1, in_progress: false, headline: "Bench is moving.", focus: "x", points: [],
+              reason: null, retryable: false, attempts: 1 },
+      });
+      const store = createAppStore({ api, storage: memoryStorage() });
+      await store.getState().loadDemo();
+      await vi.runAllTimersAsync();
+      limited = true;
+      await store.getState().requestNotes();
+      expect(store.getState().coachNotes?.headline).toBe("Bench is moving.");
+      expect(store.getState().notesStatus).toBe("error");
+      expect(store.getState().notesError).toContain("limit");
+    });
+
+    it("a temporary 'no note' (busy, limit, outage) is an error, never saved as the week's note", async () => {
+      let busy = true;
+      const { api, notesCalls } = fakeApi({
+        ...weekEnded(),
+        coachNotes: async (req) => {
+          notesCalls.push(req);
+          return busy
+            ? { source: "none", week: null, in_progress: false, headline: "", points: [], focus: "",
+                reason: "The AI coach is busy right now.", retryable: true, attempts: 0 }
+            : { source: "ai", week: 1, in_progress: false, headline: "Got it.", focus: "x", points: [],
+                reason: null, retryable: false, attempts: 1 };
+        },
+      });
+      const storage = memoryStorage();
+      const store = createAppStore({ api, storage });
+      await store.getState().loadDemo();
+      await vi.runAllTimersAsync();
+      expect(store.getState().coachNotes).toBeNull();
+      expect(store.getState()).toMatchObject({ notesStatus: "error", notesError: "The AI coach is busy right now." });
+      expect(storage.saved?.coachNotes ?? null).toBeNull();
+      busy = false;
+      await store.getState().requestNotes();
+      expect(store.getState().coachNotes?.headline).toBe("Got it.");
+    });
+
+    it("a permanent 'no note' (nothing logged yet) is kept, so it isn't asked again", async () => {
+      const { api, notesCalls } = fakeApi({
+        ...weekEnded(),
+        coachNotes: async (req) => {
+          notesCalls.push(req);
+          return { source: "none", week: null, in_progress: false, headline: "", points: [], focus: "",
+                   reason: "Log a week of training first.", retryable: false, attempts: 0 };
+        },
+      });
+      const store = createAppStore({ api, storage: memoryStorage() });
+      await store.getState().loadDemo();
+      await vi.runAllTimersAsync();
+      expect(store.getState().coachNotes?.reason).toBe("Log a week of training first.");
+      await store.getState().refreshMetrics();
+      await vi.runAllTimersAsync();
+      expect(notesCalls).toHaveLength(1);
+    });
+
+    it("asking twice while the coach is thinking sends one request", async () => {
+      const { api, notesCalls } = fakeApi();
+      const store = createAppStore({ api, storage: memoryStorage() });
+      await store.getState().loadDemo();
+      await Promise.all([store.getState().requestNotes(), store.getState().requestNotes()]);
+      expect(notesCalls).toHaveLength(1);
+    });
+
+    it("a late note is dropped when the data was replaced, even with the same block number", async () => {
+      let answer: (v: Awaited<ReturnType<ApiClient["coachNotes"]>>) => void = () => {};
+      const { api } = fakeApi({ coachNotes: () => new Promise((resolve) => { answer = resolve; }) });
+      const store = createAppStore({ api, storage: memoryStorage() });
+      await store.getState().loadDemo();
+      const exported = store.getState().exportJson();
+      const pending = store.getState().requestNotes();
+      store.getState().importJson(exported);                     // block 1 again
+      answer({ source: "ai", week: 1, in_progress: false, headline: "For the old data.", focus: "x", points: [],
+               reason: null, retryable: false, attempts: 1 });
+      await pending;
+      expect(store.getState().coachNotes).toBeNull();
+      expect(store.getState().notesStatus).toBe("idle");
+    });
+
+    it("a note that arrives after a new block started is dropped, not stuck loading", async () => {
+      let answer: (v: Awaited<ReturnType<ApiClient["coachNotes"]>>) => void = () => {};
+      const { api } = fakeApi({ coachNotes: () => new Promise((resolve) => { answer = resolve; }) });
+      const store = createAppStore({ api, storage: memoryStorage() });
+      await store.getState().loadDemo();
+      const pending = store.getState().requestNotes();
+      await store.getState().startFromProfile(profile);            // block 2
+      answer({ source: "ai", week: 1, in_progress: false, headline: "Old block.", focus: "x", points: [],
+               reason: null, retryable: false, attempts: 1 });
+      await pending;
+      expect(store.getState().coachNotes).toBeNull();
+      expect(store.getState().notesStatus).toBe("idle");
+    });
+
+    it("notes survive a reload, and an import or a new block drops them", async () => {
+      const storage = memoryStorage();
+      const { api } = fakeApi(weekEnded());
+      const store = createAppStore({ api, storage });
+      await store.getState().loadDemo();
+      await vi.runAllTimersAsync();
+      const exported = store.getState().exportJson();
+
+      const reloaded = createAppStore({ api: fakeApi().api, storage });
+      reloaded.getState().hydrate();
+      expect(reloaded.getState().coachNotes?.headline).toBe("Bench is moving.");
+
+      const { api: quiet } = fakeApi();
+      const imported = createAppStore({ api: quiet, storage: memoryStorage() });
+      imported.getState().importJson(exported);
+      expect(imported.getState().coachNotes).toBeNull();          // a file's notes aren't trusted...
+      const { api: again, notesCalls: askedAgain } = fakeApi(weekEnded());
+      const fresh = createAppStore({ api: again, storage: memoryStorage() });
+      fresh.getState().importJson(exported);
+      await vi.runAllTimersAsync();
+      expect(askedAgain).toHaveLength(1);                           // ...so they're written again
+
+      await reloaded.getState().startFromProfile(profile);
+      expect(reloaded.getState().coachNotes).toBeNull();
+    });
   });
 
   it("session navigation", () => {

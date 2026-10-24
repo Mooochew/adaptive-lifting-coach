@@ -34,8 +34,11 @@ class Settings(BaseSettings):
     ai_reviews_per_day: int = 200
     ai_max_concurrent_reviews: int = 4      # more at once get the standard plan (keeps the API responsive)
 
-    # When true, LLM routes return recorded fixtures instead of calling the provider.
+    # Demo mode: replay AI replies recorded in demo_dir; a request never seen before goes to the
+    # live model above (if any) and is recorded. Rehearse once, then the demo runs offline. See
+    # app/llm/replay.py.
     demo_mode: bool = False
+    demo_dir: str = str(Path(__file__).resolve().parent.parent / "demo" / "recordings")
 
     @property
     def cors_origins(self) -> list[str]:
