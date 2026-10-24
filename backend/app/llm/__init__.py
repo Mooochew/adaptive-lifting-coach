@@ -7,7 +7,16 @@ __all__ = ["InvalidOutput", "LLMClient", "LLMUnavailable", "LLMUsage", "build_ll
 
 
 def build_llm(settings: Settings) -> LLMClient | None:
-    """The configured provider, or None when the AI review is off (lifters get the baseline)."""
+    """The configured provider, or None when the AI review is off (lifters get the baseline).
+    In demo mode, the provider (or none) wrapped in recorded replies."""
+    live = _provider(settings)
+    if settings.demo_mode:
+        from app.llm.replay import ReplayLLM
+        return ReplayLLM(settings.demo_dir, live, model=settings.llm_model)
+    return live
+
+
+def _provider(settings: Settings) -> LLMClient | None:
     if settings.llm_provider == "fake":
         from app.llm.fake import FakeLLM
         return FakeLLM()

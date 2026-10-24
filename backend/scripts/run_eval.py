@@ -9,11 +9,15 @@ Costs money with a real model (a few cents per case). Writes evals/results/<time
 (gitignored). For each case it records: whether the review was accepted on the first try, attempts,
 fallbacks, the automatic checks from profiles.json, tokens (and how many were cached), seconds, and an
 estimated cost. Read the report's summaries and reasons yourself: the checks can't judge coaching.
+It also writes <time>-<model>-compare.html: each case's standard and AI-reviewed week 1, blinded
+as Plan A and Plan B, to judge before opening the answer key.
 Run the same cases on another model to compare (a bake-off); log prompt changes in docs/prompt-log.md.
 """
 
 import argparse
+import html
 import json
+import random
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,13 +26,15 @@ BACKEND = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND))
 
 from app.ai_review import ReviewResult, run_review  # noqa: E402
+from app.exercises import exercise_name  # noqa: E402
+from app.review import baseline_outcome  # noqa: E402
 from app.config import Settings  # noqa: E402
 from app.guards import weekly_muscle_sets  # noqa: E402
 from app.llm import LLMClient, build_llm  # noqa: E402
 from app.llm.fake import FakeLLM  # noqa: E402
 from app.prompts.program_review import PROMPT_VERSION  # noqa: E402
 from app.rules import VOLUME_TARGET_MUSCLES  # noqa: E402
-from app.schemas import Profile  # noqa: E402
+from app.schemas import Profile, Week  # noqa: E402
 from app.templates import build_week_one  # noqa: E402
 
 CASES = BACKEND / "evals" / "profiles.json"
@@ -63,6 +69,41 @@ def check(case: dict, profile: Profile, result: ReviewResult) -> dict[str, bool]
     return checks
 
 
+def plan_lines(week: Week) -> list[str]:
+    """Week 1 as plain lines, for the blinded comparison."""
+    lines = []
+    for s in week.sessions:
+        lines.append(f"Day {s.day} · {s.focus}")
+        for e in s.exercises:
+            reps = f"{e.reps}-{e.reps_max}" if e.reps_max and e.reps_max != e.reps else f"{e.reps}"
+            lines.append(f"  {exercise_name(e.exercise_id)}: {e.sets} x {reps} @ RPE {e.target_rpe:g}")
+    return lines
+
+
+def compare_page(rows: list[dict], seed: int = 0) -> str:
+    """A blinded side-by-side page: each case's standard and AI-reviewed week 1 as Plan A and Plan B
+    in a random order, with the answer key at the bottom. Judge the plans before opening the key."""
+    rng = random.Random(seed)
+    esc = html.escape
+    parts, key = [], []
+    for r in rows:
+        plans = [("standard", r["plans"]["standard"]), ("AI-reviewed", r["plans"]["reviewed"])]
+        rng.shuffle(plans)
+        title = f"{r['case']} (run {r['run']})"
+        notes = "; ".join(x for x in (r["injuries"], r["training_background"]) if x) or "no notes"
+        cols = "".join(f"<div><h3>Plan {label}</h3><pre>{esc(chr(10).join(lines))}</pre></div>"
+                       for label, (_, lines) in zip("AB", plans))
+        parts.append(f"<section><h2>{esc(title)}</h2><p>{esc(r['about'])} Lifter notes: {esc(notes)}</p>"
+                     f"<div class=cols>{cols}</div></section>")
+        key.append(f"<li>{esc(title)}: A = {plans[0][0]}, B = {plans[1][0]}</li>")
+    style = ("body{font:15px system-ui;margin:24px;max-width:1100px}.cols{display:grid;"
+             "grid-template-columns:1fr 1fr;gap:16px}pre{background:#f4f4f4;padding:10px;white-space:pre-wrap}")
+    return (f"<!doctype html><meta charset=utf-8><title>Blinded comparison</title><style>{style}</style>"
+            f"<h1>AI review: blinded comparison</h1><p>For each lifter, which plan fits better, and why? "
+            f"Decide before opening the key.</p>{''.join(parts)}"
+            f"<details><summary>Answer key</summary><ul>{''.join(key)}</ul></details>")
+
+
 def cost(name: str, usage: dict) -> float | None:
     if name not in PRICES:
         return None
@@ -92,6 +133,8 @@ def run(llm: LLMClient, cases: list[dict], runs: int = 1) -> list[dict]:
                 "edits": [{"change": e.change, "reason": e.reason, "for_injury": e.for_injury}
                           for e in result.outcome.applied],
                 "checks": checks, "passed": all(checks.values()),
+                "plans": {"standard": plan_lines(baseline_outcome(profile).program.weeks[0]),
+                          "reviewed": plan_lines(result.outcome.program.weeks[0])},
                 "usage": usage, "seconds": round(llm.usage.seconds - before_seconds, 1),
                 "cost_usd": cost(llm.name, usage),
             })
@@ -162,6 +205,7 @@ def main(argv: list[str] | None = None) -> Path:
     (args.out / f"{stem}.json").write_text(json.dumps(rows, indent=2), encoding="utf-8")
     path = args.out / f"{stem}.md"
     path.write_text(report(rows, llm.name), encoding="utf-8")
+    path.with_name(f"{stem}-compare.html").write_text(compare_page(rows), encoding="utf-8")
     print(report(rows, llm.name).split("\n## ")[0])
     print(f"Full report: {path}")
     return path

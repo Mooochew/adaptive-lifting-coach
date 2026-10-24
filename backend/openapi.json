@@ -196,6 +196,48 @@
         }
       }
     },
+    "/coach/notes": {
+      "post": {
+        "tags": [
+          "coach"
+        ],
+        "summary": "Coach Notes",
+        "description": "A short AI note about the latest logged week, grounded in the engine's numbers.\n\n`source: \"none\"` with a `reason` (safe to show) when nothing is logged, the AI is off, busy,\nover the usage limits, unavailable, or couldn't write a note that matches the numbers.",
+        "operationId": "coach_notes_coach_notes_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CoachNotesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CoachNotesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "tags": [
@@ -370,6 +412,135 @@
           "for_injury"
         ],
         "title": "AppliedEdit"
+      },
+      "CoachNotesRequest": {
+        "properties": {
+          "profile": {
+            "$ref": "#/components/schemas/Profile"
+          },
+          "program": {
+            "$ref": "#/components/schemas/Program"
+          },
+          "logs": {
+            "items": {
+              "$ref": "#/components/schemas/SetLog"
+            },
+            "type": "array",
+            "maxItems": 20000,
+            "title": "Logs"
+          },
+          "changes": {
+            "items": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "type": "array",
+            "maxItems": 60,
+            "title": "Changes",
+            "description": "The plan changes from the last time a week ended (from /program/advance)",
+            "default": []
+          },
+          "week": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 16.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Week",
+            "description": "The week to write about (the one that just ended); default: the latest logged"
+          }
+        },
+        "type": "object",
+        "required": [
+          "profile",
+          "program",
+          "logs"
+        ],
+        "title": "CoachNotesRequest"
+      },
+      "CoachNotesResponse": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "ai",
+              "none"
+            ],
+            "title": "Source"
+          },
+          "week": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Week",
+            "description": "The training week the note is about"
+          },
+          "in_progress": {
+            "type": "boolean",
+            "title": "In Progress",
+            "description": "True when that week isn't finished yet"
+          },
+          "headline": {
+            "type": "string",
+            "title": "Headline"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/NotePointOut"
+            },
+            "type": "array",
+            "title": "Points"
+          },
+          "focus": {
+            "type": "string",
+            "title": "Focus"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason",
+            "description": "Why there's no note (safe to show); null when source is 'ai'"
+          },
+          "retryable": {
+            "type": "boolean",
+            "title": "Retryable",
+            "description": "True when asking again later may give a note (busy, limits, outage)"
+          },
+          "attempts": {
+            "type": "integer",
+            "title": "Attempts",
+            "description": "Model calls that returned something"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "week",
+          "in_progress",
+          "headline",
+          "points",
+          "focus",
+          "reason",
+          "retryable",
+          "attempts"
+        ],
+        "title": "CoachNotesResponse"
       },
       "DeloadRules": {
         "properties": {
@@ -1052,6 +1223,30 @@
           "status"
         ],
         "title": "MuscleVolume"
+      },
+      "NotePointOut": {
+        "properties": {
+          "subject": {
+            "type": "string",
+            "title": "Subject"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "description": "Display name of the subject, e.g. 'Barbell Bench Press' or 'Chest'"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          }
+        },
+        "type": "object",
+        "required": [
+          "subject",
+          "label",
+          "text"
+        ],
+        "title": "NotePointOut"
       },
       "PrescribedExercise": {
         "properties": {

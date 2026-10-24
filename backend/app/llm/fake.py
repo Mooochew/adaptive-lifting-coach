@@ -11,6 +11,16 @@ T = TypeVar("T", bound=BaseModel)
 
 Reply = BaseModel | dict | Exception | Callable[[str, str], BaseModel | dict]
 
+# What the scripted model says when nothing is scripted, per reply schema (no numbers, so the
+# coach notes' grounding check always passes).
+DEFAULT_REPLIES: dict[str, dict] = {
+    "ProgramReview": {"summary": "This plan already fits you well, so I'd keep it as it is.", "edits": []},
+    "CoachNotes": {"headline": "A steady week: keep following the plan.",
+                   "points": [{"subject": "overall", "text": "Your sets lined up with the plan, so the engine "
+                                                             "keeps progressing you as written."}],
+                   "focus": "Log every set with an RPE so the next update has the full picture."},
+}
+
 
 class FakeLLM:
     """Returns (or raises) one scripted reply per call, then `default` forever.
@@ -33,7 +43,7 @@ class FakeLLM:
         self.usage.calls += 1
         reply = self.replies.pop(0) if self.replies else self.default
         if reply is None:
-            reply = {"summary": "This plan already fits you well, so I'd keep it as it is.", "edits": []}
+            reply = DEFAULT_REPLIES.get(schema.__name__, DEFAULT_REPLIES["ProgramReview"])
         if callable(reply) and not isinstance(reply, BaseModel):
             reply = reply(system, user)
         if isinstance(reply, Exception):

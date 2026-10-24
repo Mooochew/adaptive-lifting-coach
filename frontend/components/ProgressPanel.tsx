@@ -3,11 +3,12 @@
 import { useEffect } from "react";
 import { useApp } from "@/lib/store";
 import { e1rmByWeek, exerciseName, muscleName, trackedMainLifts, volumeWeek } from "@/lib/view";
+import CoachNotes from "./CoachNotes";
 import { btn } from "./ui";
 
 const SCALE_MAX = 24; // bar scale in weekly sets
 
-/** Slide-over with volume per muscle, main-lift e1RM, plan changes and deload status. */
+/** Slide-over with the AI coach's notes, volume per muscle, main-lift e1RM, plan changes and deload status. */
 export default function ProgressPanel({ open, onClose }: { open: boolean; onClose(): void }) {
   const program = useApp((s) => s.program)!;
   const metrics = useApp((s) => s.metrics);
@@ -46,6 +47,8 @@ export default function ProgressPanel({ open, onClose }: { open: boolean; onClos
           </div>
 
           {status === "loading" && !metrics && <p className="text-muted">Crunching your numbers…</p>}
+
+          <CoachNotes />
 
           {deload?.recommended && (
             <section className="border-2 border-orange p-4">
@@ -154,12 +157,6 @@ export default function ProgressPanel({ open, onClose }: { open: boolean; onClos
             </section>
           )}
 
-          <section className="border-2 border-line p-4">
-            <h3 className="display text-xl font-extrabold">Coach notes</h3>
-            <p className="mt-1.5 text-[13px] leading-relaxed text-muted">
-              AI explanations will appear here in Phase 3. Every number above comes from the Python rules engine.
-            </p>
-          </section>
         </div>
       </aside>
     </>

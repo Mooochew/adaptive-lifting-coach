@@ -4,7 +4,7 @@
  * Today: browser localStorage. Later (Supabase): implement `DataStore` against the
  * database and swap it in where the store is created; nothing else changes.
  */
-import type { CoachReview, Profile, Program, SetLog } from "./types";
+import type { CoachReview, Profile, Program, SetLog, StoredCoachNotes } from "./types";
 import { validateSetLog } from "./workout";
 
 export const STORAGE_KEY = "alc:data";
@@ -18,6 +18,8 @@ export interface AppData {
   logs: SetLog[];
   /** The AI coach's review of `program`. Optional so data saved before reviews existed still loads. */
   review?: CoachReview | null;
+  /** The AI coach's latest weekly note. Optional so data saved before notes existed still loads. */
+  coachNotes?: StoredCoachNotes | null;
   savedAt: string;
 }
 
@@ -31,6 +33,19 @@ function parseReview(raw: unknown): CoachReview | null {
       && typeof (e as Record<string, unknown>).change === "string"
       && typeof (e as Record<string, unknown>).reason === "string");
   return ok ? (raw as CoachReview) : null;
+}
+
+/** Stored coach notes if they have the right shape, else null: display-only, so never block loading on them. */
+function parseNotes(raw: unknown): StoredCoachNotes | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const n = raw as Record<string, unknown>;
+  const str = (v: unknown) => typeof v === "string";
+  const ok = (n.source === "ai" || n.source === "none") && str(n.headline) && str(n.focus)
+    && Number.isInteger(n.block) && Number.isInteger(n.adjustedThrough)
+    && (n.reason === null || str(n.reason)) && Array.isArray(n.points)
+    && n.points.every((p) => typeof p === "object" && p !== null
+      && ["subject", "label", "text"].every((k) => str((p as Record<string, unknown>)[k])));
+  return ok ? (raw as StoredCoachNotes) : null;
 }
 
 export interface DataStore {
@@ -77,6 +92,7 @@ export function parseData(raw: unknown): AppData {
     program: (d.program as Program | null) ?? null,
     logs: d.logs as SetLog[],
     review: parseReview(d.review),
+    coachNotes: parseNotes(d.coachNotes),
     savedAt: typeof d.savedAt === "string" ? d.savedAt : new Date().toISOString(),
   };
 }

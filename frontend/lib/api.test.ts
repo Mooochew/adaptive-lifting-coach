@@ -51,6 +51,17 @@ describe("api client", () => {
     expect(JSON.parse(init.body as string)).toMatchObject({ block: 3, profile: { goal: "general" } });
   });
 
+  it("asks for coach notes with the profile, program, logs and plan changes", async () => {
+    const fetchMock = vi.fn(() => json(200, { source: "none", week: null, in_progress: false, headline: "",
+                                               points: [], focus: "", reason: "Log a week", retryable: false, attempts: 0 }));
+    const res = await createApi("http://api.test", asFetch(fetchMock))
+      .coachNotes({ profile, program: { weeks: [] } as never, logs: [], changes: ["x"] });
+    expect(res.reason).toBe("Log a week");
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("http://api.test/coach/notes");
+    expect(JSON.parse(init.body as string)).toMatchObject({ changes: ["x"], profile: { goal: "general" } });
+  });
+
   it("GET requests don't send a Content-Type (no CORS preflight)", async () => {
     const fetchMock = vi.fn(() => json(200, { ok: true, demo_mode: false }));
     await createApi("http://api.test", asFetch(fetchMock)).health();

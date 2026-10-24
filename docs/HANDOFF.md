@@ -1,6 +1,6 @@
 # Handoff
 
-Read this first if you're picking up the project (human or AI agent). Last updated 2026-10-24.
+Read this first if you're picking up the project (human or AI agent). Last updated 2026-10-23.
 
 ## What this is
 
@@ -30,9 +30,9 @@ Deliverables: the GitHub repo (public: `Mooochew/adaptive-lifting-coach`), a dem
 | 2 | Templates, UI, data layer, Block Board, Playwright smoke tests | Done |
 | 3.1 | Guard hardening, input limits, retry loop | Done (`0f5a421` on `main`) |
 | 3.2 | AI program review | Done (PR #1, prompt v4, live eval run) |
-| **3.3** | **AI coach notes in the Progress panel** | **Next** |
-| 3.4 | Demo mode (recorded AI replies) and the prompt-log write-up | Later |
-| 3.5 | README, screenshots, video script | Later |
+| 3.3 | AI coach notes in the Progress panel | Built on branch `phase3-step3-coach-notes`, not merged |
+| 3.4 | Demo mode (recorded AI replies), blinded comparison page, prompt-log write-up | Built on the same branch, not merged |
+| **3.5** | **README, screenshots, video script** | **Next** |
 
 The full plan is in `docs/phase3-plan.md`, and the prompt history in `docs/prompt-log.md`.
 
@@ -65,6 +65,38 @@ Where the pieces live:
 - On the frontend, onboarding has the training-background box, and `components/CoachCard.tsx`
   shows the coach's changes on the board.
 
+### How the coach notes work (step 3.3)
+
+1. **The engine computes the week** (`compute_metrics`) and `app/coach_notes.py` turns the latest
+   logged week into plain-text facts: each lift's load × reps, RPE vs target, PRs, estimated max and
+   its change, plateaus, the engine's next step; volume per muscle (mid-week: "so far"); deload;
+   the plan changes from `/program/advance`.
+2. **The AI writes a short note** (`app/prompts/coach_notes.py`): headline, 1-4 points each about a
+   lift or muscle id from the facts, one focus.
+3. **Grounding check:** every number in the note must appear in the facts, and every subject must
+   be in them. Problems go back as feedback (`refine.py`, 3 attempts); after that, no note.
+4. `POST /coach/notes` (`app/routes/coach.py`) has its own rate limiter and shares the review's
+   concurrency slots; a request with nothing logged uses neither. The frontend asks automatically
+   once each time a week ends, about that week (`week` = `adjusted_through`), and also when data with
+   a finished week is loaded; Refresh asks about the latest logged week. A failed automatic request
+   isn't retried on every refresh. Temporary "no note" answers (busy, limits, outage:
+   `retryable: true`) show as an error and are never saved as the note; a reply that arrives after
+   the data was replaced is dropped. Notes are saved with the program (`coachNotes` in storage);
+   imported files' notes are dropped and rewritten.
+6. Plan changes from the client go in their own `<plan_changes>` block, outside `<facts>`: their
+   numbers don't count as grounded. Text from the request is kept to one line.
+5. UI: `components/CoachNotes.tsx`, at the top of the Progress panel, labelled AI-written.
+
+### Demo mode (step 3.4)
+
+`DEMO_MODE=true` wraps the configured model in `app/llm/replay.py`: a reply recorded for the exact
+request (schema + system prompt + user message) is replayed; anything new goes to the live model and
+is recorded. Rehearse the demo once with the real model, then the same steps replay instantly and
+offline. Recordings live in `backend/demo/recordings/` (gitignored: they hold what was typed) and
+are keyed by model too, so switching `LLM_MODEL` never replays another model's replies. Use demo
+mode only on the presenter's machine and delete the recordings afterwards. With demo mode on and
+`LLM_PROVIDER` empty, recorded requests still replay and anything else gets "unavailable".
+
 **Model:** `gpt-6.1-sol` (OpenAI Responses API, `openai==3.36.0`). The owner asked for a
 vendor-neutral choice, so don't steer them toward any one vendor (including Anthropic). It was
 picked on official prices and Artificial Analysis scores. Switching provider means writing one
@@ -72,16 +104,12 @@ new adapter and changing two `.env` lines.
 
 ## Next steps, in order
 
-The live OpenAI path works (first run 2026-10-23). Prompt v4 scored 29/30 first try, 0/30
-fallbacks, about $0.004 per review; see `docs/prompt-log.md` for v2 → v4.
+The live OpenAI path works (first run 2026-10-23). Review prompt v4: 29/30 first try, 0/30
+fallbacks, about $0.004 per review. Coach notes v1: 12/12 grounded first try, about $0.005 per
+note. See `docs/prompt-log.md` ("At a glance" is written for the presentation).
 
-1. **Step 3.3: AI coach notes.** Weekly plain-language explanations in the Progress panel's
-   "Coach notes" placeholder. The numbers come from `/metrics`, never from the model. This is
-   what makes the AI visible beyond onboarding in the demo.
-2. **Step 3.4: demo mode.** `DEMO_MODE` exists in config but is unused. Serve recorded AI
-   replies so the live demo works offline. Also the "blinded side-by-side page" the plan
-   promised for the eval script (never built) and the prompt-log write-up.
-3. **Step 3.5:** README polish (it still says "Work in progress", and its pitch should match
+1. **Merge the 3.3 + 3.4 branch** once reviewed and the owner OKs it.
+2. **Step 3.5:** README polish (it still says "Work in progress", and its pitch should match
    what the AI actually does), screenshots, the video script, and the presentation.
 
 ### Known open items (deliberately deferred)
@@ -98,6 +126,17 @@ From the last security review, all minor:
   that's a dev backend with a real key, it costs money.
 - **Imported reviews:** an imported data file can show any "coach review". Drop the review on
   import, or tie it to the program.
+
+From the step 3.3/3.4 reviews, accepted for a class demo:
+- **Two daily caps:** coach notes have their own rate limiter with the review's settings, so the
+  daily total is up to 200 reviews plus 200 notes (each up to 3 model calls). Keep the OpenAI
+  monthly spend limit set; add separate `AI_NOTES_*` settings or one shared counter if deployed.
+- **Plan changes after a reload:** `lastChanges` lives in memory, so a Refresh after a reload sends
+  no plan changes (the automatic note, sent right after a week ends, has them).
+- **"PR (reps or load)":** the engine's PR flag is a rep or load record, so a PR can sit next to
+  an unchanged estimated max. The facts say so; the engine can't yet tell which kind it was.
+- **No component tests** for `CoachNotes.tsx` (no React testing library installed); the store
+  tests and the e2e test cover its states.
 
 Before any public deployment:
 - count request bytes as they stream (chunked uploads bypass the 8 MB Content-Length cap)
@@ -134,10 +173,11 @@ The README has full setup. In short:
 |---|---|---|
 | Backend | `cd backend; .venv/Scripts/activate; uvicorn app.main:app --reload` | `backend/.env` from `.env.example`; the AI is off unless `LLM_PROVIDER=openai` and a key are set |
 | Frontend | `cd frontend; npm ci; npm run dev` | localhost only |
-| Backend tests | `pytest` (in `backend/`) | 605 tests |
-| Frontend tests | `npm test`, `npm run typecheck`, `npm run lint` | 82 unit tests |
-| End-to-end | `npm run test:e2e` | Starts its own servers on 8100/3100 with the scripted AI (no key, no cost); 8 tests |
-| AI eval | `python scripts/run_eval.py [--fake]` | Real model needs the key; reports go to `backend/evals/results/` (gitignored) |
+| Backend tests | `pytest` (in `backend/`) | 635 tests |
+| Frontend tests | `npm test`, `npm run typecheck`, `npm run lint` | 90 unit tests |
+| End-to-end | `npm run test:e2e` | Starts its own servers on 8100/3100 with the scripted AI (no key, no cost, usage limits lifted); 9 tests |
+| AI eval | `python scripts/run_eval.py [--fake]` | Real model needs the key; reports and a blinded `*-compare.html` go to `backend/evals/results/` (gitignored) |
+| Notes eval | `python scripts/run_notes_eval.py [--runs 3] [--fake]` | Coach notes on four demo-athlete weeks |
 | API types | `python scripts/export_openapi.py`, then `npm run gen:types` | After any backend model change; a test fails if they're stale |
 
 ## Gotchas

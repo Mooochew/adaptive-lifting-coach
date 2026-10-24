@@ -9,12 +9,14 @@
  *    (1) advance the program if a week has ended, then (2) compute metrics.
  *    A newer refresh cancels an older one, so a slow response can't overwrite fresh data.
  *  - only finished sets are saved: a saved `completed: false` set means a FAILED set
+ *  - the AI coach's notes are asked for once each time a week ends (or on Refresh); a failed
+ *    automatic request isn't repeated on every refresh
  */
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { useStore } from "zustand";
 import { api as defaultApi, ApiError, type ApiClient } from "./api";
 import { createLocalStore, emptyData, exportData, importData, type AppData, type DataStore } from "./storage";
-import type { CoachReview, ExerciseInfo, Metrics, Profile, Program, RulesResponse, SetLog } from "./types";
+import type { CoachReview, ExerciseInfo, Metrics, Profile, Program, RulesResponse, SetLog, StoredCoachNotes } from "./types";
 import { currentPosition, newId, newSetProblem, removeLog, upsertLog, withIds, type SessionRef } from "./workout";
 
 export type LoadStatus = "idle" | "loading" | "ready" | "error";
@@ -38,6 +40,10 @@ export interface AppState {
   lastChanges: string[];
   /** Muscles the schedule can't bring to the starting volume (from the template). */
   volumeShortfalls: string[];
+  /** The AI coach's note on the latest week (null until a week has ended or Refresh is pressed). */
+  coachNotes: StoredCoachNotes | null;
+  notesStatus: LoadStatus;
+  notesError: string | null;
 
   busy: "demo" | "template" | null;
   error: string | null;
@@ -60,6 +66,8 @@ export interface AppState {
   upsertSet(log: SetLog): void;
   removeSet(log: SetLog): void;
   refreshMetrics(): Promise<void>;
+  /** Ask the AI coach for a note on `week` (automatic, when a week ends) or on the latest logged week (Refresh). */
+  requestNotes(week?: number): Promise<void>;
   exportJson(): string;
   importJson(text: string): void;
   clearError(): void;
@@ -83,11 +91,13 @@ export function createAppStore({
 }: StoreDeps = {}): StoreApi<AppState> {
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   let inflight: AbortController | null = null;
+  let notesTriedFor: string | null = null;   // block:week of the last automatic request
+  let dataVersion = 0;                       // bumped whenever all data is replaced: late replies are dropped
 
   return createStore<AppState>()((set, get) => {
     const snapshot = (): AppData => {
-      const { profile, program, logs, review } = get();
-      return { ...emptyData(), profile, program, logs, review };
+      const { profile, program, logs, review, coachNotes } = get();
+      return { ...emptyData(), profile, program, logs, review, coachNotes };
     };
     const persist = () => {
       const ok = storage.save(snapshot());
@@ -102,14 +112,48 @@ export function createAppStore({
       }, metricsDebounceMs);
     };
 
+    /** This block's logs the backend will accept; the rest are named in `problems`. */
+    const usableLogs = (program: Program) => {
+      // The backend only uses this block's logs; sending older blocks would let one
+      // stale row from long ago fail every refresh. Rows it would reject (saved before a
+      // limit existed, or imported) are left out and named in a banner instead.
+      const { catalog } = get();
+      const catalogLoaded = Object.keys(catalog).length > 0;
+      const problems: string[] = [];
+      const logs = get().logs.filter((l) => {
+        if (l.block !== program.block) return false;
+        const problem = newSetProblem(l)
+          ?? (catalogLoaded && !catalog[l.exercise_id] ? `unknown exercise "${l.exercise_id}"` : null);
+        if (problem) problems.push(problem);
+        return !problem;
+      });
+      return { logs, problems };
+    };
+
+    /** A week has ended since the last note: ask once (automatic; Refresh can always ask again). */
+    const notesDue = () => {
+      const { program, coachNotes } = get();
+      if (!program || program.adjusted_through < 1) return false;
+      const key = `${program.block}:${program.adjusted_through}`;
+      const covered = coachNotes?.block === program.block && coachNotes.adjustedThrough >= program.adjusted_through;
+      if (covered || notesTriedFor === key) return false;
+      notesTriedFor = key;
+      return true;
+    };
+
     /** Replace all lifter data at once (demo, new program, import). */
-    const replaceData = (data: Pick<AppData, "profile" | "program" | "logs" | "review">) => {
+    const replaceData = (data: Pick<AppData, "profile" | "program" | "logs" | "review" | "coachNotes">) => {
       const logs = withIds(data.logs);
+      notesTriedFor = null;            // new data: its finished week may be asked about once
+      dataVersion += 1;
       set({
         profile: data.profile,
         program: data.program,
         logs,
         review: data.review ?? null,
+        coachNotes: data.coachNotes ?? null,
+        notesStatus: "idle",
+        notesError: null,
         metrics: null,
         metricsStatus: "idle",
         metricsError: null,
@@ -133,6 +177,9 @@ export function createAppStore({
       metricsError: null,
       lastChanges: [],
       volumeShortfalls: [],
+      coachNotes: null,
+      notesStatus: "idle",
+      notesError: null,
       busy: null,
       error: null,
       saveFailed: false,
@@ -195,7 +242,7 @@ export function createAppStore({
       reset() {
         if (debounceTimer) clearTimeout(debounceTimer);
         inflight?.abort();
-        replaceData({ profile: null, program: null, logs: [], review: null });
+        replaceData({ profile: null, program: null, logs: [], review: null, coachNotes: null });
         storage.clear(); // replaceData persisted an empty snapshot; leave storage truly empty
         set({ volumeShortfalls: [], saveFailed: false, error: null, ignoredSets: null });
       },
@@ -230,20 +277,7 @@ export function createAppStore({
         const { profile } = get();
         let { program } = get();
         if (!profile || !program) return;
-        // The backend only uses this block's logs; sending older blocks would let one
-        // stale row from long ago fail every refresh. Rows it would reject (saved before a
-        // limit existed, or imported) are left out and named in a banner instead.
-        const block = program.block;
-        const { catalog } = get();
-        const catalogLoaded = Object.keys(catalog).length > 0;
-        const problems: string[] = [];
-        const logs = get().logs.filter((l) => {
-          if (l.block !== block) return false;
-          const problem = newSetProblem(l)
-            ?? (catalogLoaded && !catalog[l.exercise_id] ? `unknown exercise "${l.exercise_id}"` : null);
-          if (problem) problems.push(problem);
-          return !problem;
-        });
+        const { logs, problems } = usableLogs(program);
         const n = problems.length;
         set({ ignoredSets: n ? `${n} logged set${n === 1 ? " in this block is" : "s in this block are"} ` +
                                 `ignored for your progress (${problems[0]}).` : null });
@@ -264,12 +298,40 @@ export function createAppStore({
           }
           // 2. Metrics for the (possibly updated) program.
           const metrics = await api.metrics({ goal: profile.goal, program, logs }, controller.signal);
-          if (inflight === controller) set({ metrics, metricsStatus: "ready" });
+          if (inflight === controller) {
+            set({ metrics, metricsStatus: "ready" });
+            if (notesDue()) void get().requestNotes(program.adjusted_through);   // the week that just ended
+          }
         } catch (err) {
           if (controller.signal.aborted || isAbort(err)) return; // superseded by a newer refresh
           set({ metricsStatus: "error", metricsError: message(err) });
         } finally {
           if (inflight === controller) inflight = null;
+        }
+      },
+
+      async requestNotes(week) {
+        const { profile, program, lastChanges } = get();
+        if (!profile || !program || get().notesStatus === "loading") return;
+        const asked = dataVersion;
+        set({ notesStatus: "loading", notesError: null });
+        try {
+          const res = await api.coachNotes({ profile, program, logs: usableLogs(program).logs, changes: lastChanges,
+                                             ...(week ? { week } : {}) });
+          if (dataVersion !== asked) {                            // replaced while the coach was thinking
+            set({ notesStatus: "idle" });
+            return;
+          }
+          if (res.source === "none" && res.retryable) {
+            // Busy, over the limit, unavailable: not the week's note. Keep whatever is shown.
+            set({ notesStatus: "error", notesError: res.reason ?? "The coach couldn't write notes right now." });
+            return;
+          }
+          set({ coachNotes: { ...res, block: program.block, adjustedThrough: program.adjusted_through },
+                notesStatus: "ready" });
+          persist();
+        } catch (err) {
+          set(dataVersion === asked ? { notesStatus: "error", notesError: message(err) } : { notesStatus: "idle" });
         }
       },
 
@@ -279,7 +341,8 @@ export function createAppStore({
 
       importJson(text) {
         try {
-          replaceData(importData(text));
+          // Notes from a file aren't trusted to describe its data; they're written again once a week ends.
+          replaceData({ ...importData(text), coachNotes: null });
           set({ error: null, volumeShortfalls: [] });
           void get().refreshMetrics();
         } catch (err) {

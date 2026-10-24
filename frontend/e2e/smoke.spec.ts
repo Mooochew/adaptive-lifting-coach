@@ -94,7 +94,7 @@ test.describe("coach card", () => {
     const card = page.getByRole("region", { name: "Coach adjustments" });
     await expect(card).toContainText("Standard plan");
     await expect(card).toContainText("The AI coach is unavailable right now");
-    await expect(page.getByText("AI-written")).toHaveCount(0);
+    await expect(card.getByText("AI-written")).toHaveCount(0);
   });
 });
 
@@ -130,6 +130,39 @@ test("progress panel shows volume and estimated maxes", async ({ page }) => {
   await expect(panel).toBeHidden();
 });
 
+test("coach notes arrive on their own once a week has ended, and Refresh asks again", async ({ page }) => {
+  await loadDemo(page);                    // the demo athlete has finished weeks: a note is asked for at once
+  await page.getByRole("button", { name: "Progress", exact: true }).click();
+  const notes = page.getByRole("region", { name: "Coach notes" });
+  await expect(notes.getByText("A steady week: keep following the plan.")).toBeVisible();   // the scripted model
+  await expect(notes.getByText("AI-written")).toBeVisible();
+  await expect(notes.getByText("Week 2 · finished")).toBeVisible();     // the week that just ended
+
+  // Refresh renders the new reply: answer it with a different note.
+  await page.route("**/coach/notes", async (route) => {
+    const res = await route.fetch();
+    const body = await res.json();
+    await route.fulfill({ response: res, json: { ...body, headline: "Fresh look: still on track." } });
+  });
+  await notes.getByRole("button", { name: "Refresh" }).click();
+  await expect(notes.getByText("Fresh look: still on track.")).toBeVisible();
+  await expect(notes.getByRole("button", { name: "Refresh" })).toBeEnabled();
+
+  // A refresh that fails keeps the note and says so.
+  await page.unroute("**/coach/notes");
+  await page.route("**/coach/notes", (route) => route.fulfill({ json: {
+    source: "none", week: null, in_progress: false, headline: "", points: [], focus: "",
+    reason: "The AI coach is busy right now. Try again in a minute.", retryable: true, attempts: 0 } }));
+  await notes.getByRole("button", { name: "Refresh" }).click();
+  await expect(notes.getByText("Couldn't refresh: The AI coach is busy right now. Try again in a minute.")).toBeVisible();
+  await expect(notes.getByText("Fresh look: still on track.")).toBeVisible();
+  await page.unroute("**/coach/notes");
+
+  await page.reload();                     // the last good note was saved with the program
+  await page.getByRole("button", { name: "Progress", exact: true }).click();
+  await expect(notes.getByText("Fresh look: still on track.")).toBeVisible();
+});
+
 test.describe("backend down", () => {
   // The blocked requests show up as console errors; that's the point of this test.
   test.use({ allowedErrors: [/Failed to load resource/] });
@@ -149,6 +182,8 @@ test("export, reset and import round-trips all data", async ({ page }) => {
   await loadDemo(page);
   const before = await savedData(page);
   expect(before?.logs.length).toBeGreaterThan(0);
+  await expect.poll(async () => (await savedData(page))?.coachNotes?.source).toBe("ai");   // asked for on load
+  const { coachNotes: notesBefore, ...rest } = (await savedData(page))!;
 
   await openDataMenu(page);
   const [download] = await Promise.all([
@@ -171,6 +206,10 @@ test("export, reset and import round-trips all data", async ({ page }) => {
   await chooser.setFiles(file);
 
   await waitForBoard(page);
-  expect(await savedData(page)).toEqual(before);
+  // Notes in a file aren't trusted to describe its data: they're dropped and written again.
+  await expect.poll(async () => (await savedData(page))?.coachNotes?.headline).toBe(notesBefore.headline);
+  const after = (await savedData(page))!;
+  delete after.coachNotes;
+  expect(after).toEqual(rest);
   expect(JSON.parse(await readFile(file, "utf-8")).logs).toHaveLength(before.logs.length);
 });

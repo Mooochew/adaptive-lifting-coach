@@ -10,6 +10,8 @@
 import { API_URL } from "./config";
 import type {
   AdvanceResponse,
+  CoachNotesRequest,
+  CoachNotesResponse,
   DemoAthlete,
   ExerciseInfo,
   Health,
@@ -54,6 +56,8 @@ export interface ApiClient {
   review(profile: Profile, block?: number): Promise<ReviewResponse>;
   advance(req: MetricsRequest, signal?: AbortSignal): Promise<AdvanceResponse>;
   metrics(req: MetricsRequest, signal?: AbortSignal): Promise<Metrics>;
+  /** A short AI note on the latest logged week, grounded in the engine's numbers. */
+  coachNotes(req: CoachNotesRequest): Promise<CoachNotesResponse>;
 }
 
 /** Turn FastAPI's 422 body into one readable line. */
@@ -140,6 +144,8 @@ export function createApi(baseUrl: string = API_URL, fetchImpl: FetchLike = fetc
       post<ReviewResponse>("/program/review", { profile, block }, { timeoutMs: REVIEW_TIMEOUT_MS }),
     advance: (req, signal) => post<AdvanceResponse>("/program/advance", req, { signal }),
     metrics: (req, signal) => post<Metrics>("/metrics", req, { signal }),
+    // Same thinking-and-retry budget as the review.
+    coachNotes: (req) => post<CoachNotesResponse>("/coach/notes", req, { timeoutMs: REVIEW_TIMEOUT_MS }),
   };
 }
 

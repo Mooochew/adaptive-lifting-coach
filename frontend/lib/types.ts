@@ -28,6 +28,8 @@ export type TemplateRequest = Schemas["TemplateRequest"];
 export type AdvanceResponse = Schemas["AdvanceResponse"];
 export type ReviewResponse = Schemas["ReviewResponse"];
 export type AppliedEdit = Schemas["AppliedEdit"];
+export type CoachNotesRequest = Schemas["CoachNotesRequest"];
+export type CoachNotesResponse = Schemas["CoachNotesResponse"];
 
 /** The AI coach's review of a program, kept with it (null for the demo or older data). */
 export interface CoachReview {
@@ -35,6 +37,13 @@ export interface CoachReview {
   summary: string;
   edits: AppliedEdit[];
   fallbackReason: string | null;
+}
+
+/** The AI coach's note on a week, kept with the program week it was written after. */
+export interface StoredCoachNotes extends CoachNotesResponse {
+  block: number;
+  /** The program's adjusted_through when the note was asked for: a newer finished week asks again. */
+  adjustedThrough: number;
 }
 
 export type Goal = Profile["goal"];
